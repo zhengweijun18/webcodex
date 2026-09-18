@@ -79,3 +79,37 @@ available, `scripts/test_vue_lsp_protocol.py` validates real standard-LSP
 document symbols, definition, and references without depending on the Runner
 test linker. Set `WEBCODEX_RUN_REAL_VUE_LSP=1` to require that real protocol
 test instead of allowing it to be skipped when the tools are absent.
+
+## 2026-09-18 dogfood acceptance
+
+The patch was validated through WebCodex itself, not only through the standalone
+protocol smoke:
+
+- v0.4.1 patched Runner commit `c4f1d50b` built successfully with the
+  `dogfood` profile on the Intel macOS host.
+- The latest-upstream forward port at `71f4a4cf` also built the standalone
+  `webcodex-lsp` dogfood artifact and a complete patched Runner.
+- This host's selected Command Line Tools SDK is macOS 10.15-era and lacks
+  `AVFAudio.framework` plus the newer
+  `CGPreflightScreenCaptureAccess` / `CGPreflightPostEventAccess` exports.
+  Full local Runner linking was verified with a temporary overlay under
+  `target/`: an `AVFAudio.tbd` stub plus a copied CoreGraphics TBD containing
+  those two runtime-present exports. The overlay is local build scaffolding and
+  is not committed or installed into the system SDK.
+- The patched v0.4.1 Runner registered against the stock v0.4.1 Desktop/Server
+  after confirming zero active Jobs. Server compatibility remained `compatible`.
+  The stock Runner was restored after validation and all temporary launchd Jobs,
+  configs, and logs were removed.
+- A real CDI/HUI Vue 2 file,
+  `L3-CDI产品知识库/工程基础依赖包/sources/hui-vue-2.9.1/packages/input/src/input.vue`,
+  was exercised through WebCodex's own LSP tools:
+  - `lsp_status`: Vue server available via the configured environment override.
+  - `document_symbols`: 214 symbols reported.
+  - `goto_definition`: the script call `this.handleInput(event)` resolved to
+    the `handleInput` method at lines 554-565.
+  - `find_references`: the method declaration returned three in-file script
+    references including the declaration.
+  - Template `@input="handleInput"` to script definition returned no location
+    under Vue 2 + Volar 2.2.12. This is an observed language-server semantic
+    limitation for that template binding, not a WebCodex routing or process
+    failure.
