@@ -7,6 +7,8 @@ WebCodex's existing read-only semantic-navigation boundary.
 
 - WebCodex base: `v0.4.1` / `f080c8f3ea70e37bd9f17fdd0e1b4c3a3aa330f8`
 - Patch branch: `cdi/vue-lsp-native`
+- Latest-main forward-port branch: `cdi/vue-lsp-native-main`
+- Verified upstream-main base: `da4595d0fad78df6652a837c2dce120276054207`
 - Vue language server: `@vue/language-server@2.2.12`
 - TypeScript: 5.x
 - Optional overrides:
@@ -61,13 +63,19 @@ git config rerere.enabled true
 git config rerere.autoupdate true
 ```
 
+The same patch has been forward-ported from the v0.4.1 layout to the current
+upstream layout where the LSP core lives in `crates/webcodex-lsp`; the original
+patch cherry-picked cleanly across that extraction. The check script detects
+both layouts automatically. On the split layout it runs linked core tests in
+`webcodex-lsp` even when the full Runner cannot link locally.
+
 The check script does not fetch, rebase, push, publish, install packages, or
 restart Desktop. It always runs formatting plus normal/test-target `cargo
-check`. On macOS it skips linked Rust tests when the selected SDK does not
-contain `AVFAudio.framework` (older Command Line Tools cannot link the Runner's
-existing `xcap` dependency); that is an environment limitation, not a Vue patch
-failure. When the pinned Vue language server and TypeScript SDK are available,
-`scripts/test_vue_lsp_protocol.py` validates real standard-LSP document symbols,
-definition, and references without depending on the Runner test linker. Set
-`WEBCODEX_RUN_REAL_VUE_LSP=1` to require that real protocol test instead of
-allowing it to be skipped when the tools are absent.
+check`. On macOS it skips only Runner-linked Rust tests when the selected SDK
+does not contain `AVFAudio.framework` (older Command Line Tools cannot link the
+Runner's existing `xcap` dependency); that is an environment limitation, not a
+Vue patch failure. When the pinned Vue language server and TypeScript SDK are
+available, `scripts/test_vue_lsp_protocol.py` validates real standard-LSP
+document symbols, definition, and references without depending on the Runner
+test linker. Set `WEBCODEX_RUN_REAL_VUE_LSP=1` to require that real protocol
+test instead of allowing it to be skipped when the tools are absent.
