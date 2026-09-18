@@ -637,6 +637,7 @@ run on the repository machine:
 | Go | `gopls` | `go.mod`, `go.work` |
 | Python | `pyright` | `pyproject.toml`, `setup.py`, `requirements.txt`, … |
 | TypeScript / JavaScript | `typescript-language-server` | `tsconfig.json`, `package.json`, … |
+| Vue SFC | `vue-language-server` | `vue.config.js`, `vue.config.cjs`, `vue.config.mjs` |
 
 The tools are `lsp_status`, `document_symbols`, `goto_definition`,
 `find_references`, `document_diagnostics`, `hover`, and `workspace_symbols`.
@@ -648,9 +649,20 @@ They are read-only, project-bound, and constrained so that starting a language
 server never executes repository code or fetches dependencies. Paths are
 project-relative; external/dependency locations are omitted. Servers must be
 installed on the Runner machine or pointed to by env overrides such as
-`WEBCODEX_RUST_ANALYZER` and `WEBCODEX_GOPLS`. The gopls profile also forces
-module/toolchain network access off and uses `-mod=readonly`; WebCodex never
-installs gopls or fetches missing Go dependencies for semantic navigation.
+`WEBCODEX_RUST_ANALYZER`, `WEBCODEX_VUE_LANGUAGE_SERVER`, and
+`WEBCODEX_GOPLS`. Vue SFC navigation currently targets standalone
+`@vue/language-server@2.2.12`; install it with TypeScript 5, or point
+`WEBCODEX_VUE_TSDK` at a TypeScript `lib` directory. Without that override,
+WebCodex uses `<project>/node_modules/typescript/lib`. The Vue profile forces
+`vue.hybridMode=false`, disables the auto-import cache, and blocks outbound
+HTTP/package traffic. Vue Language Server 3.x currently expects an editor-owned
+`tsserver/request` bridge and is therefore not treated as a drop-in replacement
+for this standard-LSP path. The gopls profile also forces module/toolchain
+network access off and uses `-mod=readonly`; WebCodex never installs gopls or
+fetches missing Go dependencies for semantic navigation.
+The default per-project LSP process capacity is two so a Vue project can keep
+its TypeScript/JavaScript server and Vue server alive together; the existing
+per-Runner process bound remains four.
 
 Call hierarchy requires the separately advertised `lsp_call_hierarchy`
 capability and the selected server's `callHierarchyProvider`. Missing support

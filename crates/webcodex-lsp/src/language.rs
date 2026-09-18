@@ -40,7 +40,7 @@ pub(crate) struct LanguageProfile {
     /// Constrained read-only `initializationOptions` for this server. This is
     /// a per-language security boundary: starting the server must not execute
     /// repository code or fetch dependencies.
-    pub(crate) initialization_options: fn() -> Value,
+    pub(crate) initialization_options: fn(&Path) -> Value,
     /// Whether the server supports rust-analyzer's bounded server-status
     /// notification used to fence workspace-level queries until background
     /// indexing is quiescent. Other language servers keep their existing
@@ -140,6 +140,35 @@ pub(crate) static LANGUAGES: &[LanguageProfile] = &[
         startup_stderr_classifier: None,
     },
     LanguageProfile {
+        kind: LspServerKind::VueLanguageServer,
+        language_id: "vue",
+        server_name: "vue-language-server",
+        extensions: &[("vue", "vue")],
+        // Keep detection conservative: file-routed `.vue` operations work even
+        // without one of these root markers, while status avoids classifying
+        // every package.json-based JavaScript project as Vue.
+        manifest_markers: &["vue.config.js", "vue.config.cjs", "vue.config.mjs"],
+        env_override: "WEBCODEX_VUE_LANGUAGE_SERVER",
+        executable: "vue-language-server",
+        default_args: &["--stdio"],
+        initialization_options: vue_read_only_initialization_options,
+        server_status_notification: false,
+        // Vue semantic navigation is local-only. Deny accidental HTTP/package
+        // traffic from the language-server process.
+        process_env: &[
+            ("HTTP_PROXY", "http://127.0.0.1:0"),
+            ("HTTPS_PROXY", "http://127.0.0.1:0"),
+            ("ALL_PROXY", "http://127.0.0.1:0"),
+            ("NO_PROXY", "localhost,127.0.0.1,::1"),
+            ("http_proxy", "http://127.0.0.1:0"),
+            ("https_proxy", "http://127.0.0.1:0"),
+            ("all_proxy", "http://127.0.0.1:0"),
+            ("no_proxy", "localhost,127.0.0.1,::1"),
+        ],
+        unusable_command_probe: None,
+        startup_stderr_classifier: Some(vue_language_server_startup_stderr_classifier),
+    },
+    LanguageProfile {
         kind: LspServerKind::Gopls,
         language_id: "go",
         server_name: "gopls",
@@ -222,7 +251,7 @@ pub(crate) fn primary_profile(project_root: &Path) -> &'static LanguageProfile {
 }
 
 /// Human-readable supported-extension list for error messages, e.g.
-/// `.cjs, .cts, .js, .jsx, .mjs, .mts, .py, .pyi, .rs, .ts, .tsx`.
+/// `.cjs, .cts, .js, .jsx, .mjs, .mts, .py, .pyi, .rs, .ts, .tsx, .vue`.
 pub(crate) fn supported_extensions_label() -> String {
     let mut extensions = LANGUAGES
         .iter()
@@ -255,7 +284,7 @@ pub(crate) fn supported_extensions_label() -> String {
 /// When changing these options, update the security regression test
 /// `lsp_initialize_uses_constrained_rust_analyzer_profile` in lockstep. Do not
 /// allow environment variables to override these safety fields.
-fn rust_analyzer_read_only_initialization_options() -> Value {
+fn rust_analyzer_read_only_initialization_options(_project_root: &Path) -> Value {
     json!({
         "cargo": {
             "buildScripts": {
@@ -291,7 +320,7 @@ fn rust_analyzer_read_only_initialization_options() -> Value {
 ///
 /// When changing these options, update the security regression test
 /// `lsp_initialize_uses_constrained_pyright_profile` in lockstep.
-fn pyright_read_only_initialization_options() -> Value {
+fn pyright_read_only_initialization_options(_project_root: &Path) -> Value {
     json!({
         "python": {
             "analysis": {
@@ -314,12 +343,35 @@ fn pyright_read_only_initialization_options() -> Value {
 ///
 /// When changing these options, update the security regression test
 /// `lsp_initialize_uses_constrained_typescript_profile` in lockstep.
-fn typescript_read_only_initialization_options() -> Value {
+fn typescript_read_only_initialization_options(_project_root: &Path) -> Value {
     json!({
         "hostInfo": "webcodex-runner",
         "disableAutomaticTypingAcquisition": true,
         "preferences": {
             "includePackageJsonAutoImports": "off"
+        }
+    })
+}
+
+/// Standalone, read-only Vue language-server profile.
+///
+/// `@vue/language-server` 2.x defaults to hybrid mode, which expects an
+/// editor-owned TypeScript server bridge. WebCodex is a standard LSP client,
+/// so force standalone mode and point Volar at a TypeScript SDK. The SDK can
+/// be supplied explicitly with `WEBCODEX_VUE_TSDK`; otherwise a project-local
+/// `node_modules/typescript/lib` is used. Hybrid mode and auto-import cache
+/// remain hard-coded safety choices rather than caller-controlled settings.
+fn vue_read_only_initialization_options(project_root: &Path) -> Value {
+    let tsdk = std::env::var_os("WEBCODEX_VUE_TSDK")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| project_root.join("node_modules/typescript/lib"));
+    json!({
+        "typescript": {
+            "tsdk": tsdk.to_string_lossy(),
+            "disableAutoImportCache": true
+        },
+        "vue": {
+            "hybridMode": false
         }
     })
 }
@@ -343,7 +395,7 @@ fn typescript_read_only_initialization_options() -> Value {
 ///
 /// When changing these options, update `lsp_initialize_uses_constrained_gopls_profile`
 /// and the process-environment regression test in lockstep.
-fn gopls_read_only_initialization_options() -> Value {
+fn gopls_read_only_initialization_options(_project_root: &Path) -> Value {
     json!({
         "buildFlags": ["-mod=readonly"],
         "env": {
@@ -371,6 +423,20 @@ fn gopls_read_only_initialization_options() -> Value {
 /// do not need raw process stderr. Today: the rustup component being absent
 /// for the active toolchain. Returns `None` for anything else, deferring to
 /// the generic first-line summary.
+fn vue_language_server_startup_stderr_classifier(raw: &str) -> Option<String> {
+    let compact = compact_stderr(raw)?;
+    let lower = compact.to_ascii_lowercase();
+    if lower.contains("can't find typescript.js or tsserverlibrary.js")
+        || lower.contains("cannot find typescript.js or tsserverlibrary.js")
+    {
+        return Some(
+            "Vue language server could not resolve the TypeScript SDK; set WEBCODEX_VUE_TSDK or install project-local TypeScript"
+                .to_string(),
+        );
+    }
+    None
+}
+
 fn rust_analyzer_startup_stderr_classifier(raw: &str) -> Option<String> {
     let compact = compact_stderr(raw)?;
     let lower = compact.to_ascii_lowercase();
@@ -412,6 +478,7 @@ mod tests {
             LspServerKind::RustAnalyzer,
             LspServerKind::Pyright,
             LspServerKind::TypeScriptLanguageServer,
+            LspServerKind::VueLanguageServer,
             LspServerKind::Gopls,
         ];
         for kind in ALL_KINDS {
@@ -467,6 +534,8 @@ mod tests {
         assert_eq!(route_extension("tsx").unwrap().1, "typescriptreact");
         assert_eq!(route_extension("jsx").unwrap().1, "javascriptreact");
         assert_eq!(route_extension("js").unwrap().1, "javascript");
+        assert_eq!(route_extension("vue").unwrap().1, "vue");
+        assert_eq!(route_extension("VUE").unwrap().1, "vue");
         assert_eq!(route_extension("go").unwrap().1, "go");
         assert_eq!(route_extension("GO").unwrap().1, "go");
         assert!(route_extension("toml").is_none());
@@ -484,6 +553,10 @@ mod tests {
             LspServerKind::TypeScriptLanguageServer
         );
         assert_eq!(
+            route_extension("vue").unwrap().0.kind,
+            LspServerKind::VueLanguageServer
+        );
+        assert_eq!(
             route_extension("rs").unwrap().0.kind,
             LspServerKind::RustAnalyzer
         );
@@ -494,7 +567,7 @@ mod tests {
     fn supported_extensions_label_lists_all_registered_extensions() {
         assert_eq!(
             supported_extensions_label(),
-            ".cjs, .cts, .go, .js, .jsx, .mjs, .mts, .py, .pyi, .rs, .ts, .tsx"
+            ".cjs, .cts, .go, .js, .jsx, .mjs, .mts, .py, .pyi, .rs, .ts, .tsx, .vue"
         );
     }
 
@@ -506,6 +579,42 @@ mod tests {
         assert_eq!(detected.len(), 1);
         assert_eq!(detected[0].kind, LspServerKind::Pyright);
         assert_eq!(primary_profile(dir.path()).kind, LspServerKind::Pyright);
+    }
+
+    #[test]
+    fn vue_config_marker_detects_vue_without_changing_typescript_priority() {
+        let vue_only = tempfile::tempdir().unwrap();
+        std::fs::write(
+            vue_only.path().join("vue.config.js"),
+            "module.exports = {};\n",
+        )
+        .unwrap();
+        let detected = detected_profiles(vue_only.path());
+        assert_eq!(detected.len(), 1);
+        assert_eq!(detected[0].kind, LspServerKind::VueLanguageServer);
+        assert_eq!(
+            primary_profile(vue_only.path()).kind,
+            LspServerKind::VueLanguageServer
+        );
+
+        let mixed = tempfile::tempdir().unwrap();
+        std::fs::write(mixed.path().join("package.json"), "{}\n").unwrap();
+        std::fs::write(mixed.path().join("vue.config.js"), "module.exports = {};\n").unwrap();
+        let detected = detected_profiles(mixed.path());
+        assert_eq!(
+            detected
+                .iter()
+                .map(|profile| profile.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                LspServerKind::TypeScriptLanguageServer,
+                LspServerKind::VueLanguageServer
+            ]
+        );
+        assert_eq!(
+            primary_profile(mixed.path()).kind,
+            LspServerKind::TypeScriptLanguageServer
+        );
     }
 
     #[test]
