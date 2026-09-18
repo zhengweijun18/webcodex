@@ -23,7 +23,7 @@ pub(crate) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const DEFAULT_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const DEFAULT_IDLE_TTL: Duration = Duration::from_secs(15 * 60);
-const DEFAULT_MAX_SERVERS_PER_PROJECT: usize = 1;
+const DEFAULT_MAX_SERVERS_PER_PROJECT: usize = 2;
 const DEFAULT_MAX_SERVERS_PER_AGENT: usize = 4;
 const MAX_STDERR_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_DIAGNOSTIC_DOCUMENTS: usize = 256;
@@ -39,6 +39,7 @@ pub(crate) enum LspServerKind {
     RustAnalyzer,
     Pyright,
     TypeScriptLanguageServer,
+    VueLanguageServer,
     Gopls,
 }
 
@@ -2124,7 +2125,7 @@ impl ServerInstance {
         // carries its constrained read-only `initializationOptions`, pinned
         // by security regression tests.
         let profile = profile_for_kind(self.key.kind);
-        let initialization_options = (profile.initialization_options)();
+        let initialization_options = (profile.initialization_options)(&self.key.project_root);
         let mut capabilities = json!({
             "general": {
                 "positionEncodings": ["utf-8", "utf-16", "utf-32"]

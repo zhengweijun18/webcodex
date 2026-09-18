@@ -1938,6 +1938,32 @@ fn navigation_routes_tsx_file_with_react_dialect_language_id() {
 }
 
 #[test]
+fn navigation_routes_vue_sfc_to_vue_language_server() {
+    let _serial = super::serialize_fake_lsp_test();
+    let fixture = NavFixture::with_language(
+        "normal",
+        LspServerKind::VueLanguageServer,
+        &[
+            ("vue.config.js", "module.exports = {};\n"),
+            (
+                "src/App.vue",
+                "<template><main>{{ message }}</main></template>\n<script>export default { data: () => ({ message: 'hi' }) };</script>\n",
+            ),
+        ],
+    );
+    let envelope = fixture.request(RunnerLspPayload {
+        project_id: "demo".into(),
+        request: RunnerLspRequest::DocumentSymbols {
+            path: "src/App.vue".into(),
+            limit: 10,
+        },
+    });
+    assert_eq!(envelope["success"], true, "{envelope}");
+    assert_eq!(envelope["result"]["language"], "vue");
+    assert_eq!(recorded_did_open_language_id(&fixture.marker), "vue");
+}
+
+#[test]
 fn unsupported_extension_is_rejected_with_supported_list() {
     let _serial = super::serialize_fake_lsp_test();
     let fixture = NavFixture::with_language(
@@ -1960,6 +1986,7 @@ fn unsupported_extension_is_rejected_with_supported_list() {
     let message = envelope["error"]["message"].as_str().unwrap();
     assert!(message.contains(".py"), "{message}");
     assert!(message.contains(".ts"), "{message}");
+    assert!(message.contains(".vue"), "{message}");
 }
 
 #[test]
@@ -1987,6 +2014,7 @@ fn lsp_status_reports_every_registered_language_server() {
     assert!(names.contains(&"rust-analyzer"), "{names:?}");
     assert!(names.contains(&"pyright"), "{names:?}");
     assert!(names.contains(&"typescript-language-server"), "{names:?}");
+    assert!(names.contains(&"vue-language-server"), "{names:?}");
     assert!(names.contains(&"gopls"), "{names:?}");
     // The pyright server is configured (fake) here, so it resolves available.
     let pyright = servers
@@ -2239,6 +2267,96 @@ fn real_typescript_document_symbols_end_to_end() {
     assert!(
         names.iter().any(|name| name == "App"),
         "expected `App` in {names:?}"
+    );
+}
+
+/// Real end-to-end Vue SFC validation against standalone Volar 2.x.
+/// Ignored by default because it needs `vue-language-server` plus TypeScript 5.
+/// Run with:
+/// `cargo test -p webcodex-runner --bin webcodex-runner real_vue -- --ignored --nocapture`
+#[cfg(unix)]
+#[test]
+#[ignore = "requires @vue/language-server@2.2.12 + typescript@5"]
+fn real_vue_document_symbols_end_to_end() {
+    let Some(server) = real_language_server("WEBCODEX_VUE_LANGUAGE_SERVER", "vue-language-server")
+    else {
+        panic!("vue-language-server not found; set WEBCODEX_VUE_LANGUAGE_SERVER");
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("project");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("vue.config.js"), "module.exports = {};\n").unwrap();
+    fs::write(
+        root.join("tsconfig.json"),
+        "{\n  \"compilerOptions\": { \"allowJs\": true }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/App.vue"),
+        "<template><main>{{ message }}</main></template>\n<script lang=\"ts\">\nexport default {\n  name: 'App',\n  data() { return { message: 'hello' }; }\n};\n</script>\n",
+    )
+    .unwrap();
+
+    // Standalone Vue LS 2.x requires initializationOptions.typescript.tsdk.
+    // Mirror a normal project-local TypeScript install by linking the global
+    // TypeScript next to the globally installed language-server binary.
+    let ts_lib = server
+        .parent()
+        .and_then(Path::parent)
+        .map(|prefix| prefix.join("lib/node_modules/typescript"))
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| {
+            panic!("global typescript not found next to {server:?}; npm i -g typescript@5")
+        });
+    fs::create_dir_all(root.join("node_modules")).unwrap();
+    std::os::unix::fs::symlink(&ts_lib, root.join("node_modules/typescript")).unwrap();
+
+    let project_registry_dir = temp.path().join("project-registry");
+    fs::create_dir_all(&project_registry_dir).unwrap();
+    fs::write(
+        project_registry_dir.join("demo.toml"),
+        format!("id = \"demo\"\npath = {:?}\n", root.to_string_lossy()),
+    )
+    .unwrap();
+
+    let supervisor = LspSupervisor::new(LspSupervisorConfig {
+        commands: HashMap::from([(
+            LspServerKind::VueLanguageServer,
+            LspCommand::new(server).arg("--stdio"),
+        )]),
+        request_timeout: Duration::from_secs(30),
+        initialize_timeout: Duration::from_secs(30),
+        shutdown_timeout: Duration::from_secs(3),
+        ..LspSupervisorConfig::default()
+    });
+    let policy = RunnerPolicy {
+        allow_cwd_anywhere: true,
+        allowed_roots: vec![temp.path().to_path_buf()],
+        ..RunnerPolicy::default()
+    };
+
+    let req = shell_lsp_request(RunnerLspPayload {
+        project_id: "demo".into(),
+        request: RunnerLspRequest::DocumentSymbols {
+            path: "src/App.vue".into(),
+            limit: 50,
+        },
+    });
+    let result = handle_lsp_request(&policy, &project_registry_dir, &supervisor, &req);
+    assert!(result.error.is_none(), "{result:?}");
+    let value = serde_json::to_value(
+        parse_runner_lsp_result_envelope(result.stdout.as_deref().unwrap()).expect("envelope"),
+    )
+    .unwrap();
+    assert_eq!(value["success"], true, "{value}");
+    assert_eq!(value["result"]["language"], "vue");
+    assert!(
+        value["result"]["returned_count"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0,
+        "expected Vue document symbols: {value}"
     );
 }
 

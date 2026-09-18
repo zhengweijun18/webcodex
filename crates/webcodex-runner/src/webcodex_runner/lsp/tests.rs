@@ -362,6 +362,14 @@ fn workspace_symbol_timeout_uses_operation_budget_only_for_rust() {
         ),
         ordinary
     );
+    assert_eq!(
+        workspace_symbol_request_timeout(
+            LspServerKind::VueLanguageServer,
+            ordinary,
+            operation_budget
+        ),
+        ordinary
+    );
 }
 
 #[test]
@@ -470,6 +478,48 @@ fn lsp_supervisor_uses_distinct_processes_for_distinct_projects() {
         .unwrap();
     assert_ne!(first.process_id(), second.process_id());
     assert_eq!(fixture.starts(), 2);
+}
+
+#[test]
+fn lsp_supervisor_default_capacity_allows_typescript_and_vue_in_one_project() {
+    let _serial = super::super::serialize_fake_lsp_test();
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("project");
+    fs::create_dir(&root).unwrap();
+    let ts_marker = temp.path().join("ts.marker");
+    let ts_exit = temp.path().join("ts.exit");
+    let vue_marker = temp.path().join("vue.marker");
+    let vue_exit = temp.path().join("vue.exit");
+    let fake = fake_server_path();
+    let supervisor = LspSupervisor::new(LspSupervisorConfig {
+        commands: HashMap::from([
+            (
+                LspServerKind::TypeScriptLanguageServer,
+                LspCommand::new(fake.as_os_str().to_owned())
+                    .arg("normal")
+                    .arg(ts_marker.as_os_str())
+                    .arg(ts_exit.as_os_str()),
+            ),
+            (
+                LspServerKind::VueLanguageServer,
+                LspCommand::new(fake.as_os_str().to_owned())
+                    .arg("normal")
+                    .arg(vue_marker.as_os_str())
+                    .arg(vue_exit.as_os_str()),
+            ),
+        ]),
+        ..LspSupervisorConfig::default()
+    });
+
+    let ts = supervisor
+        .server_for_test(&root, LspServerKind::TypeScriptLanguageServer)
+        .unwrap();
+    let vue = supervisor
+        .server_for_test(&root, LspServerKind::VueLanguageServer)
+        .unwrap();
+
+    assert_ne!(ts.process_id(), vue.process_id());
+    assert_eq!(LspSupervisorConfig::default().max_servers_per_project, 2);
 }
 
 #[test]
@@ -1092,6 +1142,34 @@ fn lsp_initialize_uses_constrained_typescript_profile() {
         Some(&json!("webcodex-runner")),
         "{options}"
     );
+}
+
+#[test]
+fn lsp_initialize_uses_constrained_vue_profile() {
+    let _serial = super::super::serialize_fake_lsp_test();
+    let options = captured_initialize_options(LspServerKind::VueLanguageServer);
+    assert_eq!(
+        options.pointer("/vue/hybridMode"),
+        Some(&json!(false)),
+        "{options}"
+    );
+    assert_eq!(
+        options.pointer("/typescript/disableAutoImportCache"),
+        Some(&json!(true)),
+        "{options}"
+    );
+    let tsdk = options
+        .pointer("/typescript/tsdk")
+        .and_then(Value::as_str)
+        .expect("Vue profile must provide a TypeScript SDK path");
+    if let Some(override_tsdk) = std::env::var_os("WEBCODEX_VUE_TSDK") {
+        assert_eq!(tsdk, override_tsdk.to_string_lossy(), "{options}");
+    } else {
+        assert!(
+            tsdk.ends_with("node_modules/typescript/lib"),
+            "unexpected Vue tsdk path: {tsdk}"
+        );
+    }
 }
 
 #[test]
