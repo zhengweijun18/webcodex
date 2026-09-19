@@ -8,7 +8,9 @@ WebCodex's existing read-only semantic-navigation boundary.
 - WebCodex base: `v0.4.1` / `f080c8f3ea70e37bd9f17fdd0e1b4c3a3aa330f8`
 - Patch branch: `vue-lsp-native`
 - Latest-main forward-port branch: `vue-lsp-native-main`
-- Verified upstream-main base: `da4595d0fad78df6652a837c2dce120276054207`
+- Current upstream compatibility is determined by `scripts/fork_doctor.py` and
+  `scripts/check_upstream_compat.py`; do not treat this document as a pinned
+  upstream SHA ledger.
 - Vue language server: `@vue/language-server@2.2.12`
 - TypeScript: 5.x
 - Optional overrides:
@@ -84,6 +86,19 @@ available, `scripts/test_vue_lsp_protocol.py` validates real standard-LSP
 document symbols, definition, and references without depending on the Runner
 test linker. Set `WEBCODEX_RUN_REAL_VUE_LSP=1` to require that real protocol
 test instead of allowing it to be skipped when the tools are absent.
+
+## 2026-09-19 upstream compatibility acceptance
+
+- Latest fetched upstream main `fe8eea8f2acd3517254e94df64c23f9831dda71a`
+  was rehearsed in a disposable detached worktree.
+- Rebase completed without conflicts and left the real maintenance branch
+  untouched during rehearsal.
+- The actual `vue-lsp-native-main` branch was then rebased onto that upstream
+  commit and the same full regression passed again.
+- Upstream still has no native Vue SFC language profile, so the compatibility
+  patch remains necessary.
+- Language registry tests: 9/9 passed; Vue-focused tests: 3/3 passed; workspace
+  timeout test: 1/1 passed; real Vue protocol smoke: PASS.
 
 ## 2026-09-18 dogfood acceptance
 
