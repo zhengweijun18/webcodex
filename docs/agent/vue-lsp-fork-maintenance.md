@@ -21,8 +21,13 @@ WebCodex 0.4.1 does not expose.
 
 ## Updating from upstream
 
-Keep the official repository as the `upstream` remote and the personal GitHub
-fork as `origin` once it exists.
+Remote layout is fixed as:
+
+- `upstream` → `https://github.com/yyjeqhc/webcodex.git`
+- `origin` → `https://github.com/zhengweijun18/webcodex.git`
+
+Both maintenance branches use generic names: `vue-lsp-native` and
+`vue-lsp-native-main`.
 
 Before rebasing, require a clean worktree. Then:
 
