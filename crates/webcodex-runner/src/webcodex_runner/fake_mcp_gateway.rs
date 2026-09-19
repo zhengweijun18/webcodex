@@ -34,6 +34,16 @@ fn main() -> io::Result<()> {
         )?;
         append(
             marker,
+            if env::var("WEBCODEX_MCP_STATIC_CHILD").as_deref()
+                == Ok("static-provider-value")
+            {
+                "static-env-ok\n"
+            } else {
+                "static-env-bad\n"
+            },
+        )?;
+        append(
+            marker,
             if env::var_os("WEBCODEX_MCP_UNLISTED").is_none() {
                 "unlisted-env-cleared\n"
             } else {

@@ -76,6 +76,7 @@ impl Fixture {
             provider_timeout_secs,
             None,
             BTreeMap::new(),
+            BTreeMap::new(),
         )
     }
 
@@ -84,6 +85,7 @@ impl Fixture {
         default_timeout_secs: u64,
         provider_timeout_secs: Option<u64>,
         cwd: Option<String>,
+        env: BTreeMap<String, String>,
         env_from_env: BTreeMap<String, String>,
     ) -> Self {
         let temp = tempfile::tempdir().unwrap();
@@ -101,6 +103,7 @@ impl Fixture {
                 executable: fake.path.to_string_lossy().to_string(),
                 args,
                 cwd,
+                env,
                 env_from_env,
                 timeout_secs: provider_timeout_secs,
             }],
@@ -233,6 +236,10 @@ fn provider_execution_context_is_explicit_cleared_and_private() {
         2,
         None,
         Some(cwd.path().to_string_lossy().into_owned()),
+        BTreeMap::from([(
+            "WEBCODEX_MCP_STATIC_CHILD".to_string(),
+            "static-provider-value".to_string(),
+        )]),
         BTreeMap::from([
             ("GITHUB_TOKEN".to_string(), "GITHUB_TOKEN".to_string()),
             (
@@ -251,6 +258,7 @@ fn provider_execution_context_is_explicit_cleared_and_private() {
     for marker in [
         "github-env-ok",
         "mapped-env-ok",
+        "static-env-ok",
         "unlisted-env-cleared",
         "path-cleared",
         "cwd-ok",
@@ -260,6 +268,7 @@ fn provider_execution_context_is_explicit_cleared_and_private() {
     let encoded = serde_json::to_string(&response).unwrap();
     assert!(!encoded.contains("github-provider-secret-value"));
     assert!(!encoded.contains("mapped-provider-secret-value"));
+    assert!(!encoded.contains("static-provider-value"));
     assert!(!encoded.contains("must-not-reach-provider"));
 }
 
@@ -272,6 +281,7 @@ fn missing_mapped_source_fails_before_provider_spawn() {
         2,
         None,
         None,
+        BTreeMap::new(),
         BTreeMap::from([(
             "PROVIDER_CREDENTIAL".to_string(),
             "WEBCODEX_MCP_TEST_MISSING_SOURCE".to_string(),
@@ -293,6 +303,7 @@ fn sensitive_runner_env_mapping_is_blocked_before_provider_spawn() {
         2,
         None,
         None,
+        BTreeMap::new(),
         BTreeMap::from([(
             "PROVIDER_CREDENTIAL".to_string(),
             "WEBCODEX_AGENT_TOKEN".to_string(),
@@ -319,6 +330,7 @@ fn unavailable_provider_cwd_fails_before_provider_spawn() {
         2,
         None,
         Some(missing.to_string_lossy().into_owned()),
+        BTreeMap::new(),
         BTreeMap::new(),
     );
     let response = fixture.list(&fixture.provider());

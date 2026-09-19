@@ -10,6 +10,10 @@ fn mcp_gateway_register_request_projects_bounded_provider_inventory_without_loca
         executable: "/private/operator/bin/local-tools-mcp".to_string(),
         args: vec!["--secret-profile".to_string()],
         cwd: Some("/private/operator/provider-workdir".to_string()),
+        env: std::collections::BTreeMap::from([(
+            "HTTP_PROXY".to_string(),
+            "http://proxy.invalid:8080".to_string(),
+        )]),
         env_from_env: std::collections::BTreeMap::from([(
             "GITHUB_TOKEN".to_string(),
             "OPERATOR_GITHUB_TOKEN".to_string(),
@@ -33,6 +37,7 @@ fn mcp_gateway_register_request_projects_bounded_provider_inventory_without_loca
     assert!(!serialized.contains("/private/operator/provider-workdir"));
     assert!(!serialized.contains("GITHUB_TOKEN"));
     assert!(!serialized.contains("OPERATOR_GITHUB_TOKEN"));
+    assert!(!serialized.contains("proxy.invalid"));
     assert!(!serialized.contains("timeout_secs"));
 }
 

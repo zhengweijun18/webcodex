@@ -338,7 +338,14 @@ impl ProviderEntry {
 fn resolve_provider_environment(
     config: &McpGatewayProviderConfig,
 ) -> Result<Vec<(String, std::ffi::OsString)>, ProviderFailure> {
-    let mut resolved = Vec::with_capacity(config.env_from_env.len());
+    let mut resolved =
+        Vec::with_capacity(config.env.len().saturating_add(config.env_from_env.len()));
+    for (destination, value) in &config.env {
+        if is_sensitive_env_key(destination) {
+            return Err(ProviderFailure::before_send("provider_env_forbidden"));
+        }
+        resolved.push((destination.clone(), std::ffi::OsString::from(value)));
+    }
     for (destination, source) in &config.env_from_env {
         // Keep the Runner transport/account secret invariant authoritative even
         // if a caller constructs config without going through load_config.
@@ -387,7 +394,7 @@ impl ProviderConnection {
         command
             .args(&config.args)
             // Never inherit the Runner process environment implicitly. Only the
-            // explicit env_from_env mapping below crosses this trust boundary.
+            // explicit static env and env_from_env mappings below cross this trust boundary.
             .env_clear();
         for (destination, value) in environment {
             command.env(destination, value);

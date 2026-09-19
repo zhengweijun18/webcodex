@@ -31,6 +31,47 @@ identity, rollback backup, persisted Vue LSP toolchain, suspicious Git proxy
 configuration, upstream drift, and optional deep/bridge regressions. It never
 mutates repository or external state.
 
+## Bootstrap the pinned Vue LSP toolchain
+
+Read current toolchain status:
+
+```bash
+python3 scripts/vue_lsp_toolchain.py status
+```
+
+Install or repair the pinned toolchain only with an explicit confirmation:
+
+```bash
+python3 scripts/vue_lsp_toolchain.py install --confirm INSTALL
+```
+
+An optional `--proxy` can be supplied for environments that require an HTTP
+proxy. The installer stages exact Vue/TypeScript versions, rewrites GitHub SSH
+package URLs to HTTPS for the install process only, creates an absolute-Node
+wrapper, persists the Desktop environment through a user LaunchAgent, and
+verifies the resulting state.
+
+## Stable local MCP provider environment
+
+Runner-owned MCP providers run with a cleared child environment. Use the
+provider-local `env` map for stable, non-secret machine values that must survive
+Desktop launches and restarts, for example an absolute `PATH`, npm cache path,
+or a local HTTP proxy:
+
+```toml
+[[mcp.providers]]
+id = "example"
+# ... executable / args / cwd ...
+env = { PATH = "/usr/local/bin:/usr/bin:/bin", HTTP_PROXY = "http://proxy.example:8080" }
+```
+
+Use `env_from_env` only when the value must be supplied by the Runner process at
+spawn time, especially for externally managed credentials. Static `env` and
+`env_from_env` may not target the same child key, WebCodex-sensitive transport
+keys are rejected, and neither map is advertised in Runner provider inventory.
+The provider child still receives an `env_clear()` environment; this feature
+adds explicit configuration, not implicit host inheritance.
+
 ## Rehearse an upstream update
 
 Fetch upstream separately, then rehearse the forward-port in a disposable
@@ -67,7 +108,9 @@ scripts/build_local_desktop_candidate.sh --reuse-runtime
 The builder keeps macOS SDK compatibility shims under `target/`, repairs the
 known Rolldown optional x64 binding when npm omits it, builds the Tauri `app`
 bundle, verifies codesign and all bundled runtime identities, and writes a
-machine-readable provenance JSON next to the candidate.
+machine-readable provenance JSON next to the candidate. Provenance includes
+runtime hashes plus Rust, Node/npm, macOS SDK, Vue language-server, and
+TypeScript toolchain versions.
 
 ## Desktop lifecycle
 

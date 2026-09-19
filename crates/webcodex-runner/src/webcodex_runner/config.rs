@@ -159,6 +159,8 @@ impl Default for AcpConfig {
 
 const MCP_GATEWAY_MAX_ENV_MAPPINGS: usize = 64;
 const MCP_GATEWAY_MAX_ENV_NAME_BYTES: usize = 256;
+const MCP_GATEWAY_MAX_ENV_VALUE_BYTES: usize = 16 * 1024;
+const MCP_GATEWAY_MAX_ENV_TOTAL_BYTES: usize = 64 * 1024;
 pub(crate) const MCP_GATEWAY_MAX_CWD_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -179,6 +181,10 @@ pub(crate) struct McpGatewayProviderConfig {
     /// Optional host-local working directory used exactly as `Command::current_dir`.
     #[serde(default)]
     pub(crate) cwd: Option<String>,
+    /// Explicit provider environment values from local Runner configuration.
+    /// They are never advertised and the child still inherits nothing implicitly.
+    #[serde(default)]
+    pub(crate) env: BTreeMap<String, String>,
     /// Explicit provider-env-key -> Runner-process-env-key mapping. Values are
     /// resolved only immediately before first spawn and are never advertised.
     #[serde(default)]
@@ -1738,13 +1744,54 @@ fn validate_mcp_gateway_config(config: &McpGatewayConfig) -> Result<(), String> 
                 ));
             }
         }
-        if provider.env_from_env.len() > MCP_GATEWAY_MAX_ENV_MAPPINGS {
+        if provider
+            .env
+            .len()
+            .saturating_add(provider.env_from_env.len())
+            > MCP_GATEWAY_MAX_ENV_MAPPINGS
+        {
             return Err(format!(
-                "mcp provider '{}' env_from_env may contain at most {MCP_GATEWAY_MAX_ENV_MAPPINGS} entries",
+                "mcp provider '{}' env plus env_from_env may contain at most {MCP_GATEWAY_MAX_ENV_MAPPINGS} entries",
                 provider.id
             ));
         }
-        let mut destinations: Vec<&str> = Vec::with_capacity(provider.env_from_env.len());
+        let mut destinations: Vec<&str> = Vec::with_capacity(
+            provider
+                .env
+                .len()
+                .saturating_add(provider.env_from_env.len()),
+        );
+        let mut env_total_bytes = 0usize;
+        for (destination, value) in &provider.env {
+            if validate_mcp_gateway_env_name(destination).is_err()
+                || value.len() > MCP_GATEWAY_MAX_ENV_VALUE_BYTES
+                || value.contains('\0')
+            {
+                return Err(format!(
+                    "mcp provider '{}' env contains an invalid name or value",
+                    provider.id
+                ));
+            }
+            if super::shell::is_sensitive_env_key(destination) {
+                return Err(format!(
+                    "mcp provider '{}' env may not set WebCodex-sensitive environment variables",
+                    provider.id
+                ));
+            }
+            if destinations
+                .iter()
+                .any(|existing| super::shell::env_keys_equal(*existing, destination))
+            {
+                return Err(format!(
+                    "mcp provider '{}' env contains conflicting destination names for this platform",
+                    provider.id
+                ));
+            }
+            env_total_bytes = env_total_bytes
+                .saturating_add(destination.len())
+                .saturating_add(value.len());
+            destinations.push(destination);
+        }
         for (destination, source) in &provider.env_from_env {
             if validate_mcp_gateway_env_name(destination).is_err()
                 || validate_mcp_gateway_env_name(source).is_err()
@@ -1772,6 +1819,15 @@ fn validate_mcp_gateway_config(config: &McpGatewayConfig) -> Result<(), String> 
                 ));
             }
             destinations.push(destination);
+            env_total_bytes = env_total_bytes
+                .saturating_add(destination.len())
+                .saturating_add(source.len());
+        }
+        if env_total_bytes > MCP_GATEWAY_MAX_ENV_TOTAL_BYTES {
+            return Err(format!(
+                "mcp provider '{}' environment configuration exceeds {MCP_GATEWAY_MAX_ENV_TOTAL_BYTES} bytes",
+                provider.id
+            ));
         }
     }
     Ok(())
@@ -1897,6 +1953,7 @@ mod mcp_gateway_config_tests {
                 .into_owned(),
             args: Vec::new(),
             cwd: None,
+            env: BTreeMap::new(),
             env_from_env: BTreeMap::new(),
             timeout_secs: None,
         }
@@ -1976,7 +2033,7 @@ mod mcp_gateway_config_tests {
             .collect();
         assert!(validate(too_many)
             .unwrap_err()
-            .contains("env_from_env may contain at most"));
+            .contains("env plus env_from_env may contain at most"));
     }
 
     #[test]
@@ -1995,6 +2052,27 @@ mod mcp_gateway_config_tests {
                 .unwrap_err()
                 .contains("WebCodex-sensitive"));
         }
+
+        let mut static_sensitive = provider();
+        static_sensitive.env.insert(
+            "WEBCODEX_AGENT_TOKEN".to_string(),
+            "should-never-be-accepted".to_string(),
+        );
+        assert!(validate(static_sensitive)
+            .unwrap_err()
+            .contains("WebCodex-sensitive"));
+
+        let mut mixed_duplicate = provider();
+        mixed_duplicate.env.insert(
+            "HTTP_PROXY".to_string(),
+            "http://proxy.invalid:8080".to_string(),
+        );
+        mixed_duplicate
+            .env_from_env
+            .insert("HTTP_PROXY".to_string(), "HTTP_PROXY".to_string());
+        assert!(validate(mixed_duplicate)
+            .unwrap_err()
+            .contains("conflicting destination names"));
 
         let mut case_pair = provider();
         case_pair.env_from_env = BTreeMap::from([

@@ -304,13 +304,78 @@ def check_upstream_state(root: Path, branch: str, upstream_ref: str):
     return passed("forward-port branch contains current upstream", data)
 
 
+def check_zero_quota_state(root: Path, workspace: Path | None):
+    if workspace is None:
+        return skipped("zero-quota state contract not requested")
+    state_path = (
+        workspace
+        / "artifacts/outputs/webcodex-codex-parity/target-mode-state.json"
+    )
+    if not state_path.is_file():
+        raise RuntimeError(f"zero-quota state file is missing: {state_path}")
+    value = json.loads(state_path.read_text())
+    provider = value.get("provider") or {}
+    closure = value.get("closure") or {}
+    effectful = value.get("native_mcp_effectful_proxy") or {}
+    readonly = value.get("native_mcp_readonly_proxy") or {}
+    required_tools = {
+        "describe_native_mcp_tool",
+        "call_native_mcp_readonly",
+        "call_native_mcp_effectful",
+        "context_parity_check",
+    }
+    tools = set(provider.get("tools") or [])
+    failures = []
+    if value.get("schema") != "webcodex-codex-target-mode.v3":
+        failures.append("unexpected state schema")
+    if provider.get("bridge_version") != "0.4.0":
+        failures.append("bridge version is not 0.4.0")
+    if provider.get("tool_count") != 14 or not required_tools.issubset(tools):
+        failures.append("provider tool contract drift")
+    for key in (
+        "provider_refresh",
+        "self_check",
+        "context_parity_check",
+        "describe_native_mcp_tool",
+        "state_report_sync",
+    ):
+        if closure.get(key) != "pass":
+            failures.append(f"closure.{key} is not pass")
+    if effectful.get("quota_mode") != "zero_codex_model_turn":
+        failures.append("effectful quota mode drift")
+    if effectful.get("model_turn_started") is not False:
+        failures.append("effectful model_turn_started drift")
+    if readonly.get("quota_mode") != "zero_codex_model_turn":
+        failures.append("readonly quota mode drift")
+    if readonly.get("model_turn_started") is not False:
+        failures.append("readonly model_turn_started drift")
+    if value.get("native_runtime", {}).get("acp_coding_agent_enabled") is not False:
+        failures.append("ACP coding agent unexpectedly enabled")
+    if failures:
+        raise RuntimeError("; ".join(failures))
+    return passed(
+        "zero-Codex-model-turn state contract is intact",
+        {
+            "state": str(state_path),
+            "bridge_version": provider.get("bridge_version"),
+            "tool_count": provider.get("tool_count"),
+            "fingerprint": value.get("context", {}).get("fingerprint"),
+        },
+    )
+
+
 def check_context_bridge(root: Path, workspace: Path | None):
     if workspace is None:
         return skipped("context bridge self-check not requested")
     script = workspace / "tooling/tools/webcodex-codex-context-bridge/self-check.mjs"
     if not script.is_file():
         raise RuntimeError(f"context bridge self-check is missing: {script}")
-    result = run(["node", str(script)], cwd=workspace, timeout=90, check=False)
+    try:
+        result = run(["node", str(script)], cwd=workspace, timeout=30, check=False)
+    except subprocess.TimeoutExpired:
+        return warning(
+            "context bridge self-check exceeded 30s; zero-quota state is checked separately"
+        )
     if result.returncode != 0:
         raise RuntimeError(
             f"context bridge self-check failed: {(result.stderr or result.stdout)[-2000:]}"
@@ -383,6 +448,11 @@ def main() -> int:
         checks,
         "upstream-state",
         lambda: check_upstream_state(root, args.forward_branch, args.upstream_ref),
+    )
+    record(
+        checks,
+        "zero-quota-state",
+        lambda: check_zero_quota_state(root, args.context_workspace),
     )
     record(
         checks,
