@@ -206,14 +206,34 @@ for name in webcodex webcodex-server webcodex-runner; do
   }
 done
 
+rustc_version="$(rustc --version)"
+cargo_version="$(cargo --version)"
+node_version="$(node --version)"
+npm_version="$(npm --version)"
+sdk_path="$(xcrun --show-sdk-path 2>/dev/null || true)"
+sdk_version="$(xcrun --show-sdk-version 2>/dev/null || true)"
+vue_tool_root="$HOME/Library/Application Support/dev.webcodex.desktop/local-tools/vue-lsp-2.2.12"
+vue_version=""
+typescript_version=""
+if [ -f "$vue_tool_root/node_modules/@vue/language-server/package.json" ]; then
+  vue_version="$(node -p "require('$vue_tool_root/node_modules/@vue/language-server/package.json').version")"
+fi
+if [ -f "$vue_tool_root/node_modules/typescript/package.json" ]; then
+  typescript_version="$(node -p "require('$vue_tool_root/node_modules/typescript/package.json').version")"
+fi
+
 provenance="$output_root/build-provenance.json"
-python3 - "$provenance" "$app" "$source_sha" "$version" "$built_at" "$platform" "$stage/desktop-bundle.json" "$extra_rustflags" <<'PY'
+python3 - "$provenance" "$app" "$source_sha" "$version" "$built_at" "$platform" "$stage/desktop-bundle.json" "$extra_rustflags" "$rustc_version" "$cargo_version" "$node_version" "$npm_version" "$sdk_path" "$sdk_version" "$vue_version" "$typescript_version" <<'PY'
 import hashlib
 import json
 import sys
 from pathlib import Path
 
-out, app, source, version, built_at, platform, stage_metadata, rustflags = sys.argv[1:]
+(
+    out, app, source, version, built_at, platform, stage_metadata, rustflags,
+    rustc_version, cargo_version, node_version, npm_version, sdk_path,
+    sdk_version, vue_version, typescript_version,
+) = sys.argv[1:]
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -233,6 +253,16 @@ payload = {
     "codesign": "verified",
     "stage_metadata": stage_metadata,
     "rustflags_overlay": rustflags,
+    "toolchain": {
+        "rustc": rustc_version,
+        "cargo": cargo_version,
+        "node": node_version,
+        "npm": npm_version,
+        "sdk_path": sdk_path,
+        "sdk_version": sdk_version,
+        "vue_language_server": vue_version or None,
+        "typescript": typescript_version or None,
+    },
     "runtime_sha256": {
         name: sha256(runtime / name)
         for name in ("webcodex", "webcodex-server", "webcodex-runner")

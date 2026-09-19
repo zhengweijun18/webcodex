@@ -1128,6 +1128,7 @@ name = "Local tools"
 executable = {executable}
 args = ["--stdio", "$HOME", "$(id)"]
 cwd = {cwd}
+env = {{ HTTP_PROXY = "http://proxy.invalid:8080" }}
 env_from_env = {{ GITHUB_TOKEN = "GITHUB_TOKEN", HOME = "HOME" }}
 timeout_secs = 5
 "#
@@ -1146,6 +1147,13 @@ timeout_secs = 5
     assert_eq!(
         config.mcp_gateway.providers[0].cwd.as_deref(),
         Some(cwd_value.as_str())
+    );
+    assert_eq!(
+        config.mcp_gateway.providers[0]
+            .env
+            .get("HTTP_PROXY")
+            .map(String::as_str),
+        Some("http://proxy.invalid:8080")
     );
     assert_eq!(
         config.mcp_gateway.providers[0]
