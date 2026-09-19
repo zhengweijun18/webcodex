@@ -105,9 +105,8 @@ protocol smoke:
   after confirming zero active Jobs. Server compatibility remained `compatible`.
   The stock Runner was restored after validation and all temporary launchd Jobs,
   configs, and logs were removed.
-- A real CDI/HUI Vue 2 file,
-  `L3-CDI产品知识库/工程基础依赖包/sources/hui-vue-2.9.1/packages/input/src/input.vue`,
-  was exercised through WebCodex's own LSP tools:
+- A real Vue 2 component from an application workspace was exercised through
+  WebCodex's own LSP tools:
   - `lsp_status`: Vue server available via the configured environment override.
   - `document_symbols`: 214 symbols reported.
   - `goto_definition`: the script call `this.handleInput(event)` resolved to
