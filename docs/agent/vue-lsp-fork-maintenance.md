@@ -6,8 +6,8 @@ WebCodex's existing read-only semantic-navigation boundary.
 ## Supported runtime
 
 - WebCodex base: `v0.4.1` / `f080c8f3ea70e37bd9f17fdd0e1b4c3a3aa330f8`
-- Patch branch: `cdi/vue-lsp-native`
-- Latest-main forward-port branch: `cdi/vue-lsp-native-main`
+- Patch branch: `vue-lsp-native`
+- Latest-main forward-port branch: `vue-lsp-native-main`
 - Verified upstream-main base: `da4595d0fad78df6652a837c2dce120276054207`
 - Vue language server: `@vue/language-server@2.2.12`
 - TypeScript: 5.x
@@ -28,7 +28,7 @@ Before rebasing, require a clean worktree. Then:
 
 ```bash
 git fetch upstream --tags
-git switch cdi/vue-lsp-native
+git switch vue-lsp-native
 git rebase <new-upstream-ref>
 scripts/check_vue_lsp_patch.sh
 ```
