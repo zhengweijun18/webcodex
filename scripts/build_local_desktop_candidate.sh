@@ -140,7 +140,7 @@ else
   apply_overlay_rustflags
   cargo build --locked --profile dogfood \
     -p webcodex-cli --bin webcodex \
-    -p webcodex-server --bin webcodex-server \
+    -p webcodex --bin webcodex-server \
     -p webcodex-runner --bin webcodex-runner
 fi
 
