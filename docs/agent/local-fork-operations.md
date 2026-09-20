@@ -160,8 +160,9 @@ Verify a candidate without installing it:
 python3 scripts/local_desktop_lifecycle.py verify --candidate /path/to/WebCodex\ Desktop.app
 ```
 
-Install and rollback are intentionally unavailable while WebCodex processes are
-running and require exact confirmation words:
+An install that would actually replace the app, and every rollback, is
+intentionally unavailable while WebCodex processes are running. Mutating
+operations also require exact confirmation words:
 
 ```bash
 python3 scripts/local_desktop_lifecycle.py install \
@@ -175,7 +176,54 @@ python3 scripts/local_desktop_lifecycle.py rollback \
 
 Each mutation verifies codesign plus bundled runtime identity, takes a safety
 backup, uses a same-filesystem replacement, verifies the result, and writes a
-local receipt under the Desktop Application Support directory.
+local receipt under the Desktop Application Support directory. The compatible
+`patched-install-receipt.json` remains the current-state receipt. Successful
+mutations are also appended to `patched-install-history.jsonl` before the
+current receipt is replaced, with a stable event id so retries do not duplicate
+the same event. The history append is flushed to disk, so a later receipt
+overwrite cannot erase the earlier upgrade source.
+
+`install` is identity-idempotent: if the candidate already matches the installed
+commit/version/build identity it returns `already_installed` before checking the
+running-process guard, creates no backup, replaces nothing, and leaves the
+existing receipt untouched.
+
+For an operator-driven one-shot switch from a currently running Desktop, prefer
+`adopt` from an independent Terminal shell instead of wrapping `install` in
+`launchctl submit` or another respawning supervisor:
+
+```bash
+python3 scripts/local_desktop_lifecycle.py adopt \
+  --candidate /path/to/WebCodex\ Desktop.app \
+  --confirm ADOPT
+```
+
+`adopt` verifies identity **before** requesting Desktop quit. Repeating the same
+command after a successful adoption therefore becomes a no-op and cannot create
+self-backups or restart an already-current Desktop. A real version change asks
+the app to quit, waits up to 40 seconds without force-killing it, performs the
+normal verified install/backup/receipt sequence, and relaunches the app. Use
+`--no-relaunch` only when an intentionally stopped post-install state is wanted.
+Lifecycle mutations are also serialized by a local file lock, so concurrent
+install/adopt/rollback/prune attempts cannot race through replacement or backup
+steps.
+
+Preview redundant backups that have the exact same identity as the currently
+installed Desktop:
+
+```bash
+python3 scripts/local_desktop_lifecycle.py prune-backups
+```
+
+Delete those redundant standard self-backups while retaining the newest one:
+
+```bash
+python3 scripts/local_desktop_lifecycle.py prune-backups --confirm PRUNE
+```
+
+Backups with any other commit/version/build identity, official backups, and
+pre-rollback backups are outside this prune set and remain untouched. Increase
+`--keep-current` when more than one current-identity self-backup is desired.
 
 ## Maintenance boundary
 
