@@ -123,6 +123,7 @@ impl PersistedSessionRecord {
                 .collect(),
             completion_assignment_fence_tracking_complete: record
                 .completion_assignment_fence_tracking_complete,
+            native_context_fingerprint: record.native_context_fingerprint.clone(),
         }
     }
 
@@ -164,6 +165,7 @@ impl PersistedSessionRecord {
                 })
             && self.completion_assignment_fence_tracking_complete
                 == record.completion_assignment_fence_tracking_complete
+            && self.native_context_fingerprint == record.native_context_fingerprint
             && self.events.len() == record.events.len()
             && self.messages.len() == record.messages.len()
             && self
@@ -374,6 +376,9 @@ impl PersistedSessionRecord {
         } else {
             Default::default()
         };
+        let native_context_fingerprint = self
+            .native_context_fingerprint
+            .and_then(sanitize_native_context_fingerprint);
         Some(SessionRecord {
             session_id,
             project,
@@ -401,6 +406,7 @@ impl PersistedSessionRecord {
             assignment_history_tracking_complete,
             completion_assignment_fence_fingerprints,
             completion_assignment_fence_tracking_complete,
+            native_context_fingerprint,
         })
     }
 }
@@ -429,6 +435,11 @@ fn sanitize_materialized_validation_job_ids(values: Vec<String>) -> VecDeque<Str
 
 fn sanitize_owner_authority_fingerprint(value: String) -> Option<String> {
     is_lower_hex_sha256(&value).then_some(value)
+}
+
+fn sanitize_native_context_fingerprint(value: String) -> Option<String> {
+    let digest = value.strip_prefix("sha256:")?;
+    (is_lower_hex_sha256(digest) && digest.len() == 64).then_some(value)
 }
 
 pub fn cold_session_from_record(
@@ -466,6 +477,10 @@ pub fn cold_session_from_persisted(
         guards: persisted.guards,
         lifecycle,
         updated_at: persisted.updated_at,
+        native_context_fingerprint: persisted
+            .native_context_fingerprint
+            .clone()
+            .and_then(sanitize_native_context_fingerprint),
         project_instructions,
         raw,
     })

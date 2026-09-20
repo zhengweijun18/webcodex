@@ -1206,12 +1206,17 @@ impl ToolRuntime {
         let knowledge_association = self
             .project_knowledge_association_diagnostic(&resolved, auth)
             .await;
+        let instruction_fingerprint =
+            super::native_context::native_instruction_fingerprint(project_instructions);
+        let expected_native_fingerprint = session_summary.native_context_fingerprint.as_deref();
         let native_context = if startup.include_native_context {
             Some(
                 self.native_context_for_coding_startup(
                     &resolved,
                     title.as_deref().unwrap_or_default(),
                     resume_requested,
+                    expected_native_fingerprint,
+                    instruction_fingerprint.as_deref(),
                     auth,
                 )
                 .await,
@@ -1219,6 +1224,16 @@ impl ToolRuntime {
         } else {
             None
         };
+        if let Some(fingerprint) = native_context
+            .as_ref()
+            .filter(|context| context.get("status").and_then(Value::as_str) == Some("available"))
+            .and_then(|context| context.get("fingerprint"))
+            .and_then(Value::as_str)
+        {
+            let _ = self
+                .sessions
+                .set_native_context_fingerprint(&session_summary.session_id, fingerprint);
+        }
         let project_resolution_value =
             serde_json::to_value(&project_resolution).unwrap_or_else(|_| json!({}));
         let startup_brief = build_startup_brief(StartupBriefInput {

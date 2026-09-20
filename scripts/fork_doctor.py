@@ -304,12 +304,16 @@ def check_upstream_state(root: Path, branch: str, upstream_ref: str):
     return passed("forward-port branch contains current upstream", data)
 
 
-def check_capability_contract(root: Path):
+def check_capability_contract(root: Path, workspace: Path | None):
     script = root / "scripts/check_capability_contract.py"
     if not script.is_file():
         raise RuntimeError(f"capability contract checker is missing: {script}")
+    command = [sys.executable, str(script), "--root", str(root), "--json"]
+    if workspace is not None:
+        state_path = workspace / "artifacts/outputs/webcodex-codex-parity/target-mode-state.json"
+        command.extend(["--zero-quota-state", str(state_path)])
     result = run(
-        [sys.executable, str(script), "--root", str(root), "--json"],
+        command,
         cwd=root,
         timeout=20,
         check=False,
@@ -393,13 +397,11 @@ def check_zero_quota_state(root: Path, workspace: Path | None):
 
 
 def check_context_bridge(root: Path, workspace: Path | None):
-    if workspace is None:
-        return skipped("context bridge self-check not requested")
-    script = workspace / "tooling/tools/webcodex-codex-context-bridge/self-check.mjs"
+    script = root / "tooling/tools/codex-context-bridge/self-check.mjs"
     if not script.is_file():
         raise RuntimeError(f"context bridge self-check is missing: {script}")
     try:
-        result = run(["node", str(script)], cwd=workspace, timeout=30, check=False)
+        result = run(["node", str(script)], cwd=root, timeout=30, check=False)
     except subprocess.TimeoutExpired:
         return warning(
             "context bridge self-check exceeded 30s; zero-quota state is checked separately"
@@ -409,7 +411,7 @@ def check_context_bridge(root: Path, workspace: Path | None):
             f"context bridge self-check failed: {(result.stderr or result.stdout)[-2000:]}"
         )
     output = result.stdout.strip()
-    if '"status": "PASS"' not in output and '"status":"PASS"' not in output:
+    if '"status": "pass"' not in output and '"status":"pass"' not in output:
         return warning("context bridge self-check exited zero but did not report PASS", output[-2000:])
     return passed("context bridge self-check reports PASS")
 
@@ -477,7 +479,7 @@ def main() -> int:
         "upstream-state",
         lambda: check_upstream_state(root, args.forward_branch, args.upstream_ref),
     )
-    record(checks, "capability-contract", lambda: check_capability_contract(root))
+    record(checks, "capability-contract", lambda: check_capability_contract(root, args.context_workspace))
     record(
         checks,
         "zero-quota-state",

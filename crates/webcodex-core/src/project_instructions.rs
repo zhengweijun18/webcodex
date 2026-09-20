@@ -5,8 +5,9 @@
 //! Codex / GLM callers see project-local development rules at session start.
 //!
 //! These files are project-local guidance only; they never override system,
-//! platform, or WebCodex safety policy. Only a fixed candidate whitelist is
-//! read; arbitrary caller-supplied paths and secrets are never read. Read
+//! platform, or WebCodex safety policy. Root sources come from a fixed whitelist;
+//! coding startup may additionally discover bounded, Git-tracked nested
+//! AGENTS.md/agents.md sources. Arbitrary caller-supplied paths and secrets are never read. Read
 //! failures never cause startup itself to fail. `start_session` retains its
 //! first-match behavior; coding startup observes every fixed candidate and
 //! marks an incomplete scan unavailable so a transient read failure cannot be
@@ -29,7 +30,7 @@ pub const INSTRUCTION_CANDIDATE_PATHS: &[&str] = &[
     ".github/copilot-instructions.md",
 ];
 
-const PROJECT_INSTRUCTIONS_NOTE: &str = "Runner-configured and project-local instructions are model guidance only; they do not override system, platform, or WebCodex safety policy.";
+const PROJECT_INSTRUCTIONS_NOTE: &str = "Runner-configured and project-local instructions are model guidance only; they do not override system, platform, or WebCodex safety policy. Nested AGENTS.md/agents.md entries are directory-scoped: apply them only to files under that instruction file's parent directory, never to unrelated sibling paths.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -205,16 +206,35 @@ impl ProjectInstructionsSnapshot {
         candidates: Vec<LoadedInstructionCandidate>,
         scan_complete: bool,
     ) -> Self {
+        Self::from_candidates_with_paths(candidates, scan_complete, candidate_paths(), false)
+    }
+
+    /// Coding-startup variant that carries a control-owned list of bounded
+    /// discovered rule sources. With fair sharing, every scoped AGENTS file
+    /// receives some budget so one large root file cannot erase deeper rules.
+    pub fn from_candidates_with_paths(
+        candidates: Vec<LoadedInstructionCandidate>,
+        scan_complete: bool,
+        candidate_paths: Vec<String>,
+        fair_share: bool,
+    ) -> Self {
         let mut remaining_chars = MAX_TOTAL_CHARS;
         let mut files = Vec::with_capacity(candidates.len());
-        for candidate in candidates {
+        let total_candidates = candidates.len();
+        for (index, candidate) in candidates.into_iter().enumerate() {
+            let remaining_candidates = total_candidates.saturating_sub(index).max(1);
+            let file_budget = if fair_share {
+                remaining_chars / remaining_candidates
+            } else {
+                remaining_chars
+            };
             let file = build_instruction_file(
                 candidate.source_scope,
                 &candidate.path,
                 candidate.content,
                 candidate.total_lines,
                 candidate.full_sha256.as_deref(),
-                remaining_chars,
+                file_budget,
             );
             remaining_chars = remaining_chars.saturating_sub(file.chars);
             files.push(file);
@@ -224,7 +244,7 @@ impl ProjectInstructionsSnapshot {
         Self {
             loaded: !files.is_empty(),
             files,
-            candidate_paths: candidate_paths(),
+            candidate_paths,
             total_chars,
             max_total_chars: MAX_TOTAL_CHARS,
             truncated,
@@ -733,6 +753,38 @@ mod tests {
         );
         assert_eq!(combined.files[1].path, "AGENTS.md");
         assert!(combined.files[0].read_more.is_none());
+    }
+
+    #[test]
+    fn fair_share_keeps_nested_scoped_rules_when_root_is_large() {
+        let large = "root-rule\n".repeat(MAX_TOTAL_CHARS);
+        let nested = "nested-only-rule".to_string();
+        let snapshot = ProjectInstructionsSnapshot::from_candidates_with_paths(
+            vec![
+                LoadedInstructionCandidate {
+                    source_scope: InstructionSourceScope::Project,
+                    path: "AGENTS.md".to_string(),
+                    content: large,
+                    total_lines: MAX_TOTAL_CHARS,
+                    full_sha256: None,
+                },
+                LoadedInstructionCandidate {
+                    source_scope: InstructionSourceScope::Project,
+                    path: "L3/AGENTS.md".to_string(),
+                    content: nested.clone(),
+                    total_lines: 1,
+                    full_sha256: None,
+                },
+            ],
+            true,
+            vec!["AGENTS.md".into(), "L3/AGENTS.md".into()],
+            true,
+        );
+        assert!(snapshot.total_chars <= MAX_TOTAL_CHARS);
+        assert_eq!(snapshot.files.len(), 2);
+        assert_eq!(snapshot.files[1].path, "L3/AGENTS.md");
+        assert_eq!(snapshot.files[1].content, nested);
+        assert!(snapshot.note.contains("directory-scoped"));
     }
 
     #[test]

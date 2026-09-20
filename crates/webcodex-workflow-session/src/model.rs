@@ -189,6 +189,9 @@ pub struct SessionRecord {
     /// metadata. A historical `None` remains known no-fence history and is never
     /// admissible for live completion replay.
     pub completion_assignment_fence_tracking_complete: bool,
+    /// Last successfully observed zero-quota native-context snapshot. This is
+    /// control-owned continuity state, never execution authority.
+    pub native_context_fingerprint: Option<String>,
     pub project_instructions: Option<ProjectInstructionsSnapshot>,
 }
 
@@ -211,6 +214,7 @@ pub struct ColdSessionRecord {
     pub guards: SessionGuards,
     pub lifecycle: SessionLifecycle,
     pub updated_at: i64,
+    pub native_context_fingerprint: Option<String>,
     pub project_instructions: Option<ProjectInstructionsSummarySnapshot>,
     pub raw: Arc<RawValue>,
 }
@@ -475,6 +479,10 @@ pub struct PersistedSessionRecord {
     pub completion_assignment_fence_fingerprints: BTreeMap<String, String>,
     pub completion_assignment_fence_tracking_complete: bool,
     pub events_observed: u64,
+    /// Optional last successful native-context fingerprint. Older ledgers omit
+    /// it; current writers persist it so restart/resume can detect stale context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_context_fingerprint: Option<String>,
     /// Persistence compatibility only: accepts the retired current-v2 field.
     /// The value is inert, never restored into live Session semantics, and current
     /// writers always omit it.
@@ -1059,6 +1067,10 @@ pub struct SessionSummary {
     /// Internal sticky presentation eligibility fact; never model-facing state.
     #[serde(skip_serializing)]
     pub repository_edit_observed: bool,
+    /// Internal continuity baseline for the optional native-context bootstrap.
+    /// Never model-facing and never accepted as caller authority.
+    #[serde(skip_serializing)]
+    pub native_context_fingerprint: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub counts: SessionCounts,

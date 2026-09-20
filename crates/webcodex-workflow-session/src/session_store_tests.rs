@@ -224,6 +224,8 @@ fn session_store_persists_and_restores_basic_session() {
         Some("agent:oe:private-drop".to_string()),
         Some("persistent work".to_string()),
     );
+    let native_fingerprint = format!("sha256:{}", "a".repeat(64));
+    assert!(store.set_native_context_fingerprint(&session.session_id, &native_fingerprint));
 
     store.flush_persistence();
     let raw = std::fs::read_to_string(&ledger).unwrap();
@@ -241,6 +243,10 @@ fn session_store_persists_and_restores_basic_session() {
     assert_eq!(summary.project.as_deref(), Some("agent:oe:private-drop"));
     assert_eq!(summary.title.as_deref(), Some("persistent work"));
     assert_eq!(summary.lifecycle, SessionLifecycle::Active);
+    assert_eq!(
+        summary.native_context_fingerprint.as_deref(),
+        Some(native_fingerprint.as_str())
+    );
     assert_eq!(
         summary.execution_context,
         SessionExecutionContext::default()

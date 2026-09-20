@@ -9,13 +9,11 @@ use crate::json_measurement::serialized_json_len;
 use crate::mcp_gateway::{self, InternalMcpCallFailure, McpGatewayToolResult};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use unicase::UniCase;
 
 use super::{ReadFilesItem, ResolvedProject, ToolResult, ToolRuntime};
 
-const DEFAULT_NATIVE_CONTEXT_PROVIDER: &str = "codex_context";
-const NATIVE_CONTEXT_PROVIDER_ENV: &str = "WEBCODEX_CODEX_CONTEXT_PROVIDER";
 const NATIVE_CONTEXT_TOOL: &str = "bootstrap_context";
 const NATIVE_SKILL_LIST_TOOL: &str = "list_native_skills";
 const NATIVE_SKILL_READ_TOOL: &str = "read_native_skill";
@@ -30,6 +28,32 @@ const MAX_HOOK_ENTRIES: usize = 8;
 const MAX_KNOWLEDGE_ENTRIES: usize = 12;
 const MAX_LIFECYCLE_RESULTS: usize = 4;
 const MAX_HOOK_CONTEXT_CHARS: usize = 512;
+
+pub(crate) fn native_instruction_fingerprint(
+    snapshot: &super::project_instructions::ProjectInstructionsSnapshot,
+) -> Option<String> {
+    if !snapshot.scan_complete {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(b"webcodex/native-instruction-fingerprint/v1\0");
+    for path in &snapshot.candidate_paths {
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+    }
+    for file in &snapshot.files {
+        hasher.update(match file.source_scope {
+            super::project_instructions::InstructionSourceScope::Runner => b"runner".as_slice(),
+            super::project_instructions::InstructionSourceScope::Project => b"project".as_slice(),
+        });
+        hasher.update([0]);
+        hasher.update(file.path.as_bytes());
+        hasher.update([0]);
+        hasher.update(file.fingerprint.as_bytes());
+        hasher.update([0]);
+    }
+    Some(format!("sha256:{:x}", hasher.finalize()))
+}
 
 impl ToolRuntime {
     pub(crate) async fn native_skill_load(
@@ -276,7 +300,7 @@ impl ToolRuntime {
         arguments: Value,
         auth: Option<&AuthContext>,
     ) -> Result<Value, ToolResult> {
-        let provider = native_context_provider_id()
+        let provider = mcp_gateway::internal_native_context_provider_id()
             .map_err(|reason| native_context_tool_error(&project.resolved_id, reason, None))?;
         match mcp_gateway::call_tool_on_runner(
             self,
@@ -325,13 +349,15 @@ impl ToolRuntime {
         project: &ResolvedProject,
         prompt: &str,
         resume_requested: bool,
+        expected_fingerprint: Option<&str>,
+        instruction_fingerprint: Option<&str>,
         auth: Option<&AuthContext>,
     ) -> Value {
-        let provider = match native_context_provider_id() {
+        let provider = match mcp_gateway::internal_native_context_provider_id() {
             Ok(provider) => provider,
             Err(reason_code) => {
                 return unavailable_native_context(
-                    DEFAULT_NATIVE_CONTEXT_PROVIDER,
+                    mcp_gateway::DEFAULT_INTERNAL_NATIVE_CONTEXT_PROVIDER,
                     reason_code,
                     Some("not_started"),
                 )
@@ -346,7 +372,8 @@ impl ToolRuntime {
             "project_root": project.config.path,
             "phase": phase,
             "prompt": prompt,
-            "expected_fingerprint": Value::Null,
+            "expected_fingerprint": expected_fingerprint,
+            "instruction_fingerprint": instruction_fingerprint,
         });
         match mcp_gateway::call_tool_on_runner(
             self,
@@ -362,15 +389,6 @@ impl ToolRuntime {
             Err(failure) => project_bridge_failure(&provider, failure),
         }
     }
-}
-
-fn native_context_provider_id() -> Result<String, &'static str> {
-    let provider = std::env::var(NATIVE_CONTEXT_PROVIDER_ENV)
-        .unwrap_or_else(|_| DEFAULT_NATIVE_CONTEXT_PROVIDER.to_string());
-    if mcp_gateway::validate_provider_id(&provider).is_err() {
-        return Err("native_context_provider_invalid");
-    }
-    Ok(provider)
 }
 
 fn project_bridge_failure(provider: &str, failure: InternalMcpCallFailure) -> Value {
@@ -479,15 +497,11 @@ fn project_skills(raw: &Value) -> Value {
         .and_then(Value::as_array)
         .into_iter()
         .flatten();
-    let mut seen = HashSet::new();
     let mut entries = Vec::new();
     for skill in direct.chain(catalog) {
         let Some(name) = skill.get("name").and_then(Value::as_str) else {
             continue;
         };
-        if !seen.insert(name.to_string()) {
-            continue;
-        }
         if entries.len() >= MAX_SKILL_ENTRIES {
             break;
         }
@@ -517,13 +531,36 @@ fn project_skills(raw: &Value) -> Value {
         }
         entries.push(Value::Object(entry));
     }
+    let mut same_name_counts = HashMap::<String, usize>::new();
+    for entry in &entries {
+        if let Some(name) = entry.get("name").and_then(Value::as_str) {
+            *same_name_counts
+                .entry(name.to_ascii_lowercase())
+                .or_default() += 1;
+        }
+    }
+    for entry in &mut entries {
+        let Some(object) = entry.as_object_mut() else {
+            continue;
+        };
+        let ambiguous = object
+            .get("name")
+            .and_then(Value::as_str)
+            .and_then(|name| same_name_counts.get(&name.to_ascii_lowercase()))
+            .copied()
+            .unwrap_or(0)
+            > 1;
+        if ambiguous {
+            object.insert("ambiguous_name".to_string(), Value::Bool(true));
+        }
+    }
     let returned_count = entries.len();
     json!({
         "total_count": total_count,
         "returned_count": returned_count,
         "truncated": total_count as usize > returned_count,
         "entries": entries,
-        "selection_hint": "Use names/descriptions as routing hints. When a native Skill matches, call native_skill_load with its name; on same-name ambiguity retry with the returned opaque native_skill_id. Never request or infer a native path.",
+        "selection_hint": "Use names/descriptions as routing hints. Same-name entries remain visible and are marked ambiguous_name; call native_skill_load with the name and opaque native_skill_id when needed. Never request or infer a native path.",
     })
 }
 
@@ -706,7 +743,8 @@ fn trim_native_context(value: &mut Value) {
             value["lifecycle"]["session_start"]["results_truncated"] = Value::Bool(true);
             continue;
         }
-        if pop_array(value, "/knowledge/entries", 0) || pop_array(value, "/knowledge/keys", 0) {
+        if pop_array(value, "/knowledge/entries", 0) {
+            value["knowledge"]["routing_degraded"] = Value::Bool(true);
             continue;
         }
         if let Some(entries) = value
@@ -726,6 +764,13 @@ fn trim_native_context(value: &mut Value) {
             if removed {
                 continue;
             }
+        }
+        // Semantic knowledge keys are the cheapest durable routing signal in the
+        // startup projection. Keep them even when richer Skill/Hook metadata must
+        // be shed; losing every key makes the pathless loader unusable.
+        if pop_array(value, "/hooks/entries", 0) {
+            value["hooks"]["truncated"] = Value::Bool(true);
+            continue;
         }
         return;
     }
@@ -973,6 +1018,9 @@ mod tests {
             "ponytail@ponytail"
         );
         assert!(projected["skills"]["truncated"].as_bool().unwrap());
+        assert!(projected["knowledge"]["keys"]
+            .as_array()
+            .is_some_and(|keys| !keys.is_empty()));
         assert!(serialized_json_len(&projected).unwrap() <= STARTUP_NATIVE_CONTEXT_MAX_BYTES);
         assert!(!encoded.contains("/Users/private"));
         assert!(!encoded.contains("SECRET COMMAND"));
@@ -1002,6 +1050,57 @@ mod tests {
         assert!(encoded.contains("wc_nskill_"));
         assert!(!encoded.contains(private_path));
         assert!(!encoded.contains("/Users/private"));
+    }
+
+    #[test]
+    fn startup_projection_keeps_same_name_skill_ambiguity_visible() {
+        let raw = json!({
+            "native_skills": {
+                "count": 2,
+                "direct_user_skills": [{
+                    "name": "demo",
+                    "description": "user demo",
+                    "path": "/private/user/demo/SKILL.md",
+                    "enabled": true
+                }],
+                "catalog": [{
+                    "name": "DEMO",
+                    "description": "plugin demo",
+                    "path": "/private/plugin/demo/SKILL.md",
+                    "enabled": true
+                }]
+            }
+        });
+        let projected = project_skills(&raw);
+        let entries = projected["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|entry| entry["ambiguous_name"] == true));
+        assert_ne!(entries[0]["native_skill_id"], entries[1]["native_skill_id"]);
+    }
+
+    #[test]
+    fn instruction_fingerprint_changes_with_scoped_rule_content() {
+        use crate::tool_runtime::project_instructions::{
+            InstructionSourceScope, LoadedInstructionCandidate, ProjectInstructionsSnapshot,
+        };
+        let snapshot = |content: &str| {
+            ProjectInstructionsSnapshot::from_candidates_with_paths(
+                vec![LoadedInstructionCandidate {
+                    source_scope: InstructionSourceScope::Project,
+                    path: "nested/AGENTS.md".to_string(),
+                    content: content.to_string(),
+                    total_lines: 1,
+                    full_sha256: None,
+                }],
+                true,
+                vec!["AGENTS.md".to_string(), "nested/AGENTS.md".to_string()],
+                true,
+            )
+        };
+        let first = native_instruction_fingerprint(&snapshot("first")).unwrap();
+        let second = native_instruction_fingerprint(&snapshot("second")).unwrap();
+        assert!(first.starts_with("sha256:"));
+        assert_ne!(first, second);
     }
 
     #[test]

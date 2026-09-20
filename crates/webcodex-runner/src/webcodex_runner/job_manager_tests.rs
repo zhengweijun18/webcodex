@@ -3844,6 +3844,78 @@ fn activity_only_delivery_coalesces_without_consuming_required_semantic_queue() 
 
 #[cfg(unix)]
 #[test]
+fn successful_silent_validation_job_keeps_terminal_exit_code() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let bin = temp.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let cargo = bin.join("cargo");
+    std::fs::write(&cargo, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    let steps = vec![ShellJobValidationStep {
+        name: "format".into(),
+        program: "cargo".into(),
+        args: vec!["fmt".into(), "--".into(), "--check".into()],
+        env: Vec::new(),
+    }];
+    let mut shell = ShellConfig::default();
+    shell.path_prepend.push(bin);
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    let sink = RunnerSink::WebSocket {
+        tx,
+        client_id: "validation-agent".into(),
+        runner_instance_id: "validation-instance".into(),
+    };
+    let manager = JobManager::new(1);
+    manager.enqueue(
+        sink,
+        PendingJobStart::from_wire(
+            1,
+            RunnerPolicy {
+                allow_cwd_anywhere: true,
+                ..RunnerPolicy::default()
+            },
+            shell,
+            SshConfig::default(),
+            temp.path().join("project-registry"),
+            serde_json::from_value(json!({
+                "request_id": "silent-validation-request",
+                "client_id": "validation-agent",
+                "kind": "start_validation_job",
+                "job_id": "silent-validation-job",
+                "cwd": temp.path(),
+                "command": serde_json::to_string(&steps).unwrap(),
+                "timeout_secs": 30,
+                "requested_by": "test",
+                "created_at": chrono::Utc::now().timestamp(),
+                "job_context": test_job_context(temp.path(), vec!["format".to_string()])
+            }))
+            .unwrap(),
+        ),
+    );
+
+    let updates = collect_job_updates(&mut rx, Duration::from_secs(10));
+    let terminal = updates.last().expect("silent validation terminal update");
+    assert!(terminal.finished, "{terminal:?}");
+    assert_eq!(terminal.status, "completed", "{terminal:?}");
+    assert_eq!(terminal.exit_code, Some(0), "{terminal:?}");
+    assert_eq!(
+        terminal.command_execution_state,
+        Some(ShellCommandExecutionState::Completed),
+        "{terminal:?}"
+    );
+    let logs = terminal
+        .log_snapshot
+        .as_ref()
+        .expect("silent validation still has authoritative log snapshot");
+    assert_eq!(logs.stdout.tail, "");
+    assert_eq!(logs.stderr.tail, "");
+}
+
+#[cfg(unix)]
+#[test]
 fn noisy_validation_progress_delivery_stays_ordered_after_transport_backpressure() {
     use std::os::unix::fs::PermissionsExt;
 

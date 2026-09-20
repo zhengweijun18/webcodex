@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 
 CONTRACT = Path("docs/agent/local-fork-capability-contract.json")
@@ -30,7 +32,31 @@ def required_files(root: Path, files: tuple[str, ...]) -> tuple[bool, dict]:
     return not missing, {"files": list(files), "missing": missing}
 
 
-def probe(root: Path, capability: str) -> tuple[bool, dict]:
+def valid_zero_quota_state(state_path: Path | None) -> tuple[bool, dict]:
+    if state_path is None:
+        return False, {"external": True, "reason": "zero_quota_state_not_supplied"}
+    if not state_path.is_file():
+        return False, {"external": True, "reason": "zero_quota_state_missing", "state": str(state_path)}
+    value = json.loads(state_path.read_text(encoding="utf-8"))
+    effectful = value.get("native_mcp_effectful_proxy") or {}
+    readonly = value.get("native_mcp_readonly_proxy") or {}
+    passed = (
+        effectful.get("quota_mode") == "zero_codex_model_turn"
+        and effectful.get("model_turn_started") is False
+        and readonly.get("quota_mode") == "zero_codex_model_turn"
+        and readonly.get("model_turn_started") is False
+        and value.get("native_runtime", {}).get("acp_coding_agent_enabled") is False
+    )
+    return passed, {
+        "external": True,
+        "state": str(state_path),
+        "effectful_model_turn_started": effectful.get("model_turn_started"),
+        "readonly_model_turn_started": readonly.get("model_turn_started"),
+        "acp_coding_agent_enabled": value.get("native_runtime", {}).get("acp_coding_agent_enabled"),
+    }
+
+
+def probe(root: Path, capability: str, zero_quota_state: Path | None) -> tuple[bool, dict]:
     if capability == "native_vue_sfc_lsp":
         return contains_any(
             root,
@@ -181,19 +207,37 @@ def probe(root: Path, capability: str) -> tuple[bool, dict]:
             "contract": contract_data,
             "model_surface": model_data,
         }
+    if capability == "behavioral_native_context_conformance":
+        script = root / "scripts/check_behavioral_capabilities.py"
+        if not script.is_file():
+            return False, {"missing": str(script)}
+        result = subprocess.run(
+            [sys.executable, str(script), "--root", str(root), "--scope", "quick", "--json"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=90,
+            check=False,
+        )
+        try:
+            value = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return False, {"exit_code": result.returncode, "stderr_tail": result.stderr[-2000:]}
+        return result.returncode == 0 and value.get("status") == "passed", value
     if capability == "external_zero_quota_evidence":
-        return True, {"external": True, "checked_by": "fork_doctor.py --context-workspace"}
+        return valid_zero_quota_state(zero_quota_state)
     return False, {"error": f"unknown capability id: {capability}"}
 
 
-def check(root: Path, contract_path: Path) -> dict:
+def check(root: Path, contract_path: Path, zero_quota_state: Path | None = None) -> dict:
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     if contract.get("schema_version") != 1:
         raise RuntimeError("unsupported capability contract schema")
     results = []
     for capability in contract.get("capabilities", []):
         capability_id = capability.get("id")
-        passed, data = probe(root, capability_id)
+        passed, data = probe(root, capability_id, zero_quota_state)
         results.append(
             {
                 "id": capability_id,
@@ -222,6 +266,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--contract", type=Path)
+    parser.add_argument("--zero-quota-state", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
@@ -230,7 +275,7 @@ def main() -> int:
         if args.contract
         else root / CONTRACT
     )
-    result = check(root, contract)
+    result = check(root, contract, args.zero_quota_state)
     if args.json:
         print(json.dumps(result, indent=2))
     else:

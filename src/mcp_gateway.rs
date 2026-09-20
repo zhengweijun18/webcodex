@@ -18,6 +18,36 @@ pub(crate) const MCP_TOOL_NAME: &str = "mcp_tool";
 const MAX_SCHEMA_OBSERVATIONS: usize = 512;
 const GATEWAY_WAIT_TIMEOUT: Duration = Duration::from_secs(125);
 const INTERNAL_CONTEXT_GATEWAY_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const DEFAULT_INTERNAL_NATIVE_CONTEXT_PROVIDER: &str = "codex_context";
+pub(crate) const INTERNAL_NATIVE_CONTEXT_PROVIDER_ENV: &str = "WEBCODEX_CODEX_CONTEXT_PROVIDER";
+
+pub(crate) fn internal_native_context_provider_id() -> Result<String, &'static str> {
+    let provider = std::env::var(INTERNAL_NATIVE_CONTEXT_PROVIDER_ENV)
+        .unwrap_or_else(|_| DEFAULT_INTERNAL_NATIVE_CONTEXT_PROVIDER.to_string());
+    validate_provider_id(&provider).map_err(|_| "native_context_provider_invalid")?;
+    Ok(provider)
+}
+
+fn is_internal_model_provider(provider_id: &str) -> bool {
+    if provider_id == DEFAULT_INTERNAL_NATIVE_CONTEXT_PROVIDER {
+        return true;
+    }
+    std::env::var(INTERNAL_NATIVE_CONTEXT_PROVIDER_ENV)
+        .ok()
+        .as_deref()
+        == Some(provider_id)
+}
+
+fn reject_internal_model_provider(provider_id: &str) -> Result<(), GatewayError> {
+    if is_internal_model_provider(provider_id) {
+        Err(GatewayError::local(
+            "server_internal_only",
+            "the requested MCP server is reserved for WebCodex internal context orchestration",
+        ))
+    } else {
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct InternalMcpCallFailure {
@@ -337,6 +367,7 @@ async fn list(
         validate_provider_id(server).map_err(|_| {
             GatewayError::local("invalid_server", "server is not a valid logical MCP id")
         })?;
+        reject_internal_model_provider(server)?;
         let provider = resolve_provider(&candidates, server)?;
         let response = execute_exact(
             runtime,
@@ -375,6 +406,9 @@ async fn list(
 fn registration_routing_summary(candidates: &BTreeMap<String, Vec<ResolvedProvider>>) -> Value {
     let mut servers = Vec::with_capacity(candidates.len());
     for (provider_id, entries) in candidates {
+        if is_internal_model_provider(provider_id) {
+            continue;
+        }
         let first = &entries[0];
         servers.push(json!({
             "server": provider_id,
@@ -398,6 +432,7 @@ async fn status(
         ));
     }
     let server = required_id(args.server.as_deref(), "server")?;
+    reject_internal_model_provider(server)?;
     let candidates = visible_provider_candidates(runtime, auth).await;
     let provider = resolve_provider(&candidates, server)?;
     let response = execute_exact(
@@ -430,6 +465,7 @@ async fn describe(
         ));
     }
     let server = required_id(args.server.as_deref(), "server")?;
+    reject_internal_model_provider(server)?;
     let tool_name = required_tool(args.tool.as_deref())?;
     let candidates = visible_provider_candidates(runtime, auth).await;
     let provider = resolve_provider(&candidates, server)?;
@@ -475,6 +511,7 @@ async fn call_upstream(
     auth: Option<&AuthContext>,
 ) -> Result<McpGatewayToolResult, GatewayError> {
     let server = required_id(args.server.as_deref(), "server")?;
+    reject_internal_model_provider(server)?;
     let tool_name = required_tool(args.tool.as_deref())?;
     let arguments = args.arguments.ok_or_else(|| {
         GatewayError::local("invalid_arguments", "action=call requires arguments")
@@ -1030,6 +1067,30 @@ mod tests {
         assert!(!serde_json::to_string(&summary)
             .unwrap()
             .contains("available"));
+    }
+
+    #[test]
+    fn internal_native_context_provider_is_not_model_routable() {
+        let provider = ResolvedProvider {
+            client_id: "runner-a".to_string(),
+            runner_instance_id: "runner-a-instance".to_string(),
+            provider_id: DEFAULT_INTERNAL_NATIVE_CONTEXT_PROVIDER.to_string(),
+            provider_instance_id: "provider-instance".to_string(),
+            name: "Native Context".to_string(),
+        };
+        let candidates = BTreeMap::from([(
+            DEFAULT_INTERNAL_NATIVE_CONTEXT_PROVIDER.to_string(),
+            vec![provider],
+        )]);
+        let summary = registration_routing_summary(&candidates);
+        assert_eq!(summary["servers"].as_array().unwrap().len(), 0);
+        let error = reject_internal_model_provider(DEFAULT_INTERNAL_NATIVE_CONTEXT_PROVIDER)
+            .expect_err("internal provider must be rejected on generic model path");
+        assert_eq!(error.code, "server_internal_only");
+        assert_eq!(
+            error.dispatch_state,
+            Some(McpGatewayDispatchState::NotStarted)
+        );
     }
 
     #[test]

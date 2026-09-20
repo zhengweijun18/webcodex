@@ -829,7 +829,14 @@ impl ToolRuntime {
         use super::project_instructions::{
             ProjectInstructionsSnapshot, INSTRUCTION_CANDIDATE_PATHS,
         };
-        let reads = INSTRUCTION_CANDIDATE_PATHS
+        let (scoped_agents, scoped_scan_complete) =
+            self.discover_scoped_agent_instruction_paths(config).await;
+        let mut candidate_paths = INSTRUCTION_CANDIDATE_PATHS
+            .iter()
+            .map(|path| path.to_string())
+            .collect::<Vec<_>>();
+        candidate_paths.extend(scoped_agents);
+        let reads = candidate_paths
             .iter()
             .map(|candidate| self.read_instruction_candidate(config, candidate));
         let results = futures_util::future::join_all(reads).await;
@@ -850,9 +857,9 @@ impl ToolRuntime {
             None
         };
         let mut found = Vec::new();
-        let mut scan_complete = true;
+        let mut scan_complete = scoped_scan_complete;
         for (index, result) in results.into_iter().enumerate() {
-            let path = INSTRUCTION_CANDIDATE_PATHS[index];
+            let path = candidate_paths[index].as_str();
             let skip_alias = matches!(
                 (path, agents_alias),
                 (
@@ -877,8 +884,77 @@ impl ToolRuntime {
         } else if found.is_empty() {
             ProjectInstructionsSnapshot::unavailable()
         } else {
-            ProjectInstructionsSnapshot::from_candidates(found, scan_complete)
+            ProjectInstructionsSnapshot::from_candidates_with_paths(
+                found,
+                scan_complete,
+                candidate_paths,
+                true,
+            )
         }
+    }
+
+    /// Discover only repository-owned nested AGENTS sources. The path set is
+    /// control-owned (fixed Git pathspecs), bounded, and never caller supplied.
+    /// Failure is reported as an incomplete scan so continuation can retain the
+    /// previous scoped-rule observation rather than guessing that rules vanished.
+    async fn discover_scoped_agent_instruction_paths(
+        &self,
+        config: &ProjectConfig,
+    ) -> (Vec<String>, bool) {
+        const MAX_SCOPED_AGENT_FILES: usize = 24;
+        const MAX_SCOPED_AGENT_SOURCE_BYTES: usize = 64 * 1024;
+        const WAIT_SECS: u64 = 8;
+        let command = "git ls-files -z -- ':(glob)**/AGENTS.md' ':(glob)**/agents.md'".to_string();
+        let (request_id, rx) = match self
+            .runner_registry
+            .enqueue_internal_posix_script(
+                config.client_id.clone(),
+                Some(config.path.clone()),
+                command,
+                WAIT_SECS,
+                WAIT_SECS + 2,
+                "project_instructions".to_string(),
+            )
+            .await
+        {
+            Ok(pending) => pending,
+            Err(_) => return (Vec::new(), false),
+        };
+        let response = match tokio::time::timeout(Duration::from_secs(WAIT_SECS + 3), rx).await {
+            Ok(Ok(response))
+                if response.exit_code == Some(0)
+                    && response.error.is_none()
+                    && response
+                        .stdout
+                        .as_deref()
+                        .is_some_and(|stdout| stdout.len() <= MAX_SCOPED_AGENT_SOURCE_BYTES) =>
+            {
+                response
+            }
+            _ => {
+                self.runner_registry.cancel_request(&request_id).await;
+                return (Vec::new(), false);
+            }
+        };
+        let stdout = response.stdout.unwrap_or_default();
+        let (mut paths, unterminated) = super::file_listing::parse_nul_separated(&stdout);
+        if unterminated {
+            return (Vec::new(), false);
+        }
+        paths.retain(|path| {
+            !super::project_instructions::INSTRUCTION_CANDIDATE_PATHS.contains(&path.as_str())
+                && path.len() <= 512
+                && validate_project_relative_path(path).is_ok()
+        });
+        paths.sort_by(|left, right| {
+            left.matches('/')
+                .count()
+                .cmp(&right.matches('/').count())
+                .then_with(|| left.cmp(right))
+        });
+        let complete = paths.len() <= MAX_SCOPED_AGENT_FILES;
+        paths.truncate(MAX_SCOPED_AGENT_FILES);
+        (paths, complete)
     }
 
     async fn instruction_agents_alias_resolution(

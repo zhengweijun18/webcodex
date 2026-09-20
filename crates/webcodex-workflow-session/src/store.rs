@@ -527,6 +527,7 @@ impl SessionStore {
                 assignment_history_tracking_complete: true,
                 completion_assignment_fence_fingerprints: Default::default(),
                 completion_assignment_fence_tracking_complete: true,
+                native_context_fingerprint: None,
                 project_instructions: opts.project_instructions,
             };
             inner.insert_session(record)
@@ -790,6 +791,7 @@ impl SessionStore {
                     assignment_history_tracking_complete: true,
                     completion_assignment_fence_fingerprints: Default::default(),
                     completion_assignment_fence_tracking_complete: true,
+                    native_context_fingerprint: None,
                     project_instructions: request.project_instructions,
                 };
                 let project_instructions = record.project_instructions.clone();
@@ -833,6 +835,40 @@ impl SessionStore {
         self.with_record_for_query(session_id, |record, cold| {
             summarize_record(record, limit, cold)
         })
+    }
+
+    /// Persist one successfully observed native-context snapshot on the exact
+    /// active Workflow Session. The value is continuity metadata only; it grants
+    /// no tool or project authority.
+    pub fn set_native_context_fingerprint(&self, session_id: &str, fingerprint: &str) -> bool {
+        if !is_native_context_fingerprint(fingerprint) {
+            return false;
+        }
+        let changed = {
+            let mut inner = self.inner.lock().expect("session store mutex poisoned");
+            let Some(record) = inner
+                .sessions
+                .get_mut(session_id)
+                .and_then(StoredSession::hot_mut)
+            else {
+                return false;
+            };
+            if !record.lifecycle.allows_mutation() {
+                return false;
+            }
+            if record.native_context_fingerprint.as_deref() == Some(fingerprint) {
+                false
+            } else {
+                record.native_context_fingerprint = Some(fingerprint.to_string());
+                record.updated_at = now_ts();
+                inner.touch(session_id);
+                true
+            }
+        };
+        if changed {
+            self.persist_after_mutation();
+        }
+        true
     }
 
     /// Bounded, read-only Workflow Session rows for one exact runtime project.
@@ -2537,6 +2573,9 @@ fn summarize_record(
         lifecycle: record.lifecycle,
         git_baseline_tree: record.git_baseline_tree.clone(),
         repository_edit_observed: record.repository_edit_observed,
+        native_context_fingerprint: cold
+            .and_then(|cold| cold.native_context_fingerprint.clone())
+            .or_else(|| record.native_context_fingerprint.clone()),
         created_at: record.created_at,
         updated_at: record.updated_at,
         counts,
@@ -2552,6 +2591,16 @@ fn summarize_record(
         project_instructions,
         messages: build_messages_summary(record),
     }
+}
+
+fn is_native_context_fingerprint(value: &str) -> bool {
+    let Some(digest) = value.strip_prefix("sha256:") else {
+        return false;
+    };
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 impl SessionStoreInner {

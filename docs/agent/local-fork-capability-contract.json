@@ -61,6 +61,11 @@
       "description": "Model-visible native_skill_load and native_knowledge_load use only Skill name/opaque id or semantic knowledge key; native filesystem paths stay internal, duplicate Skill names fail closed, knowledge entries stay inside the Project, and all Bridge calls remain same-Runner schema-bound zero-quota reads."
     },
     {
+      "id": "behavioral_native_context_conformance",
+      "required": true,
+      "description": "Executable black-box evidence verifies the vendored zero-quota Context Bridge contract instead of accepting source-token presence as proof."
+    },
+    {
       "id": "external_zero_quota_evidence",
       "required": true,
       "external": true,
