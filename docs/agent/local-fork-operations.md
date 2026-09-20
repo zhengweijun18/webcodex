@@ -197,6 +197,48 @@ the Desktop. Supplying --fetch explicitly permits only the remote-tracking-ref
 update; Desktop adoption always remains a separate explicitly confirmed
 lifecycle action.
 
+## Compatibility watcher
+
+The self-maintenance layer also exposes a one-shot compatibility watcher. It is
+designed for an external scheduler such as launchd or another automation layer,
+not as a self-respawning resident process. Each invocation observes once,
+updates only its maintenance state, and exits.
+
+Initialize or check the current semantic baseline with
+scripts/self_maintenance.py watch-check, normally supplying the same
+--context-workspace used by the zero-quota parity checks.
+
+The first healthy run records a baseline under the user's WebCodex Desktop
+application-support self-maintenance directory. Subsequent runs compare a
+stable semantic projection. Volatile evidence such as the reference state's
+verified_at timestamp is ignored. Meaningful changes include upstream or
+tracked compatibility-branch identity, local capability category, retirement outcome,
+native parity route, reference surface, and zero-quota invariants.
+
+When nothing meaningful changed, the result is unchanged and no event is
+appended. When something changed, the watcher writes one deduplicated event to
+maintenance-events.jsonl and keeps the previous acknowledged baseline until the
+event is explicitly acknowledged. Re-running against the same change returns
+the same event id rather than appending duplicates.
+
+Inspect state with scripts/self_maintenance.py watch-status --json. After
+reviewing a non-blocking event, advance the baseline with
+scripts/self_maintenance.py watch-ack --event-id <event-id> --json.
+
+Blocking events cannot be acknowledged into the baseline. In particular, a
+zero-quota/parity failure is critical and fail-closed; the drift must be fixed
+before a later healthy observation can become the baseline.
+
+watch-check is non-fetching by default. Add --fetch only when remote-tracking
+ref mutation is explicitly wanted. Even with --fetch, the watcher never builds,
+installs, adopts, restarts, or otherwise mutates the Desktop, and retirement
+verification remains isolated in disposable worktrees.
+
+The state file is atomically replaced under an exclusive lock. Event history is
+append-only, flushed to disk, and semantically deduplicated. Baseline advancement
+is therefore an explicit operator decision rather than a side effect of
+observation.
+
 ## Build a local Desktop candidate
 
 Build a signed `.app` directly, without depending on DMG packaging:

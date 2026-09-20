@@ -27,6 +27,26 @@
       "blocked"
     ]
   },
+  "watcher": {
+    "execution_model": "external_scheduler_one_shot",
+    "baseline_advancement": "explicit_ack_only",
+    "zero_quota_drift": "blocking_fail_closed",
+    "desktop_mutation": false,
+    "real_branch_mutation": false,
+    "event_deduplication": "semantic_fingerprint",
+    "volatile_reference_fields_ignored": [
+      "verified_at"
+    ],
+    "tracked_change_classes": [
+      "upstream_sha",
+      "tracked_branch_sha",
+      "local_unit_category",
+      "retirement_outcome",
+      "parity_route",
+      "reference_surface",
+      "zero_quota_invariant"
+    ]
+  },
   "local_units": [
     {
       "id": "vue_sfc_lsp",

@@ -231,6 +231,30 @@ def probe(root: Path, capability: str) -> tuple[bool, dict]:
                 ),
             ),
         )
+    if capability == "compatibility_watcher":
+        return contains_any(
+            root,
+            (
+                (
+                    "scripts/self_maintenance.py",
+                    (
+                        "watch_check",
+                        "watch_ack",
+                        "maintenance-events.jsonl",
+                        "zero_quota_or_parity_drift",
+                        "blocking maintenance events cannot advance the baseline",
+                    ),
+                ),
+                (
+                    "docs/agent/self-maintenance-policy.json",
+                    (
+                        '"execution_model": "external_scheduler_one_shot"',
+                        '"baseline_advancement": "explicit_ack_only"',
+                        '"zero_quota_drift": "blocking_fail_closed"',
+                    ),
+                ),
+            ),
+        )
     return False, {"error": f"unknown capability id: {capability}"}
 
 

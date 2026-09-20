@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
 import os
 import platform
@@ -11,6 +13,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -18,6 +22,12 @@ POLICY = Path("docs/agent/self-maintenance-policy.json")
 PARITY_CHECKER = Path("scripts/check_native_semantic_parity.py")
 UPSTREAM_CHECKER = Path("scripts/check_upstream_compat.py")
 STATE_RELATIVE = Path("artifacts/outputs/webcodex-codex-parity/target-mode-state.json")
+WATCH_STATE_SCHEMA = "webcodex-self-maintenance-watch-state.v1"
+WATCH_EVENT_SCHEMA = "webcodex-self-maintenance-event.v1"
+DEFAULT_WATCH_STATE_ROOT = (
+    Path.home()
+    / "Library/Application Support/dev.webcodex.desktop/self-maintenance"
+)
 
 
 def run(
@@ -90,7 +100,114 @@ def load_policy(root: Path, policy_path: Path | None = None) -> dict:
     ]
     if failures:
         raise RuntimeError("self-maintenance invariant drift: " + ", ".join(failures))
+    watcher = policy.get("watcher") or {}
+    watcher_expected = {
+        "execution_model": "external_scheduler_one_shot",
+        "baseline_advancement": "explicit_ack_only",
+        "zero_quota_drift": "blocking_fail_closed",
+        "desktop_mutation": False,
+        "real_branch_mutation": False,
+    }
+    watcher_failures = [
+        f"{key}={watcher.get(key)!r}"
+        for key, expected in watcher_expected.items()
+        if watcher.get(key) != expected
+    ]
+    if watcher_failures:
+        raise RuntimeError(
+            "self-maintenance watcher invariant drift: " + ", ".join(watcher_failures)
+        )
     return policy
+
+
+def canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def fingerprint(value: object) -> str:
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def fsync_directory(path: Path) -> None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def atomic_write_json(path: Path, value: dict) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise RuntimeError(f"refusing to replace watcher state symlink: {path}")
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with temp.open("w", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+        fsync_directory(path.parent)
+    finally:
+        temp.unlink(missing_ok=True)
+    return path
+
+
+@contextmanager
+def watch_state_lock(state_root: Path):
+    state_root.mkdir(parents=True, exist_ok=True)
+    lock_path = state_root / "watcher.lock"
+    with lock_path.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def watch_state_path(state_root: Path) -> Path:
+    return state_root / "watcher-state.json"
+
+
+def watch_history_path(state_root: Path) -> Path:
+    return state_root / "maintenance-events.jsonl"
+
+
+def read_watch_state(state_root: Path) -> dict | None:
+    path = watch_state_path(state_root)
+    if not path.is_file():
+        return None
+    value = load_json(path)
+    if value.get("schema") != WATCH_STATE_SCHEMA:
+        raise RuntimeError(f"unsupported watcher state schema: {value.get('schema')!r}")
+    return value
+
+
+def append_watch_event(state_root: Path, event: dict) -> tuple[Path, bool]:
+    path = watch_history_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise RuntimeError(f"refusing to append watcher history symlink: {path}")
+    event_id = event.get("event_id")
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                existing = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if existing.get("event_id") == event_id:
+                return path, False
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    fsync_directory(path.parent)
+    return path, True
 
 
 def ref_file_text(root: Path, ref: str, relative: str) -> str | None:
@@ -220,7 +337,7 @@ def assess_units(root: Path, policy: dict, branch: str, upstream_ref: str) -> li
     return results
 
 
-def run_parity_report(root: Path, context_workspace: Path | None) -> dict:
+def run_parity_report_raw(root: Path, context_workspace: Path | None) -> tuple[dict, int]:
     command = [sys.executable, str(root / PARITY_CHECKER), "--root", str(root), "--json"]
     if context_workspace is not None:
         command.extend(["--context-workspace", str(context_workspace)])
@@ -229,7 +346,12 @@ def run_parity_report(root: Path, context_workspace: Path | None) -> dict:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError("native semantic parity checker returned invalid JSON") from exc
-    if result.returncode != 0 or payload.get("status") != "passed":
+    return payload, result.returncode
+
+
+def run_parity_report(root: Path, context_workspace: Path | None) -> dict:
+    payload, returncode = run_parity_report_raw(root, context_workspace)
+    if returncode != 0 or payload.get("status") != "passed":
         raise RuntimeError(
             "native semantic parity failed: "
             + "; ".join(payload.get("failed_checks") or [payload.get("error") or "unknown"])
@@ -352,6 +474,7 @@ def build_inventory(
             "native_codex_model_quota_budget": 0,
             "codex_model_fallback_allowed": False,
         },
+        "watcher": policy.get("watcher") or {},
         "local_units": units,
         "parity_gaps": categorize_parity(parity, units),
         "reference_surface": reference_surface(context_workspace),
@@ -359,6 +482,527 @@ def build_inventory(
     }
     payload["semantic_diff"] = semantic_diff(payload, baseline)
     return payload
+
+
+def stable_reference_surface(surface: dict | None) -> dict | None:
+    if surface is None:
+        return None
+    return {
+        key: value
+        for key, value in surface.items()
+        if key not in {"verified_at"}
+    }
+
+
+def retirement_trigger(inventory: dict) -> str:
+    return fingerprint(
+        {
+            "branch_sha": inventory.get("branch_sha"),
+            "upstream_sha": inventory.get("upstream_sha"),
+            "units": [
+                {
+                    "id": item.get("id"),
+                    "category": item.get("category"),
+                    "upstream_satisfies": item.get("upstream_satisfies"),
+                    "local_implementation_present": item.get("local_implementation_present"),
+                }
+                for item in inventory.get("local_units") or []
+            ],
+        }
+    )
+
+
+def retirement_outcomes_for_watch(
+    root: Path,
+    policy: dict,
+    branch: str,
+    upstream_ref: str,
+    inventory: dict,
+    prior_observed: dict | None,
+) -> tuple[dict[str, str], bool]:
+    trigger = retirement_trigger(inventory)
+    if (
+        prior_observed
+        and prior_observed.get("retirement_trigger") == trigger
+        and isinstance(prior_observed.get("retirement_outcomes"), dict)
+    ):
+        return dict(prior_observed["retirement_outcomes"]), True
+
+    outcomes: dict[str, str] = {}
+    verification_ids = set()
+    for item in inventory.get("local_units") or []:
+        unit_id = item.get("id")
+        category = item.get("category")
+        if category == "upstream_can_replace_local":
+            verification_ids.add(unit_id)
+        elif category == "required_local":
+            outcomes[unit_id] = "required_local"
+        elif category == "upstream_native":
+            outcomes[unit_id] = "upstream_native"
+        else:
+            outcomes[unit_id] = "needs_human_review"
+
+    if verification_ids:
+        report = retirement_report(
+            root,
+            policy,
+            branch,
+            upstream_ref,
+            verification_ids,
+        )
+        for item in report.get("results") or []:
+            outcomes[item.get("id")] = item.get("outcome") or "needs_human_review"
+    return outcomes, False
+
+
+def watch_semantic_snapshot(
+    inventory: dict,
+    retirement_outcomes: dict[str, str],
+) -> dict:
+    units = {}
+    for item in inventory.get("local_units") or []:
+        unit_id = item.get("id")
+        units[unit_id] = {
+            "category": item.get("category"),
+            "retirement_outcome": retirement_outcomes.get(unit_id),
+            "upstream_satisfies": item.get("upstream_satisfies"),
+            "local_implementation_present": item.get("local_implementation_present"),
+        }
+    parity = {}
+    for item in inventory.get("parity_gaps") or []:
+        parity[item.get("id")] = {
+            "category": item.get("category"),
+            "route": item.get("route"),
+            "required": item.get("required"),
+            "evidence_status": item.get("evidence_status"),
+            "codex_model_fallback_allowed": item.get("codex_model_fallback_allowed"),
+        }
+    return {
+        "schema_version": 1,
+        "goal": inventory.get("goal"),
+        "branch": inventory.get("branch"),
+        "branch_sha": inventory.get("branch_sha"),
+        "upstream_ref": inventory.get("upstream_ref"),
+        "upstream_sha": inventory.get("upstream_sha"),
+        "invariants": inventory.get("invariants"),
+        "local_units": units,
+        "parity_gaps": parity,
+        "reference_surface": stable_reference_surface(inventory.get("reference_surface")),
+    }
+
+
+def dict_changes(before: dict | None, after: dict | None) -> dict:
+    before = before or {}
+    after = after or {}
+    changes = {}
+    for key in sorted(set(before) | set(after)):
+        if before.get(key) != after.get(key):
+            changes[key] = {"before": before.get(key), "after": after.get(key)}
+    return changes
+
+
+def watch_semantic_diff(baseline: dict, current: dict) -> dict:
+    upstream_change = None
+    if baseline.get("upstream_sha") != current.get("upstream_sha"):
+        upstream_change = {
+            "before": baseline.get("upstream_sha"),
+            "after": current.get("upstream_sha"),
+        }
+    branch_change = None
+    if baseline.get("branch_sha") != current.get("branch_sha"):
+        branch_change = {
+            "before": baseline.get("branch_sha"),
+            "after": current.get("branch_sha"),
+        }
+    invariant_changes = dict_changes(
+        baseline.get("invariants"),
+        current.get("invariants"),
+    )
+    unit_changes = dict_changes(
+        baseline.get("local_units"),
+        current.get("local_units"),
+    )
+    parity_changes = dict_changes(
+        baseline.get("parity_gaps"),
+        current.get("parity_gaps"),
+    )
+    reference_changes = dict_changes(
+        baseline.get("reference_surface"),
+        current.get("reference_surface"),
+    )
+
+    human_review = []
+    for unit_id, item in (current.get("local_units") or {}).items():
+        if (
+            item.get("category") == "needs_human_review"
+            or item.get("retirement_outcome") == "needs_human_review"
+        ):
+            human_review.append(f"local:{unit_id}")
+    for capability_id, item in (current.get("parity_gaps") or {}).items():
+        if item.get("category") == "needs_human_review":
+            human_review.append(f"parity:{capability_id}")
+
+    changed = any(
+        (
+            upstream_change,
+            branch_change,
+            invariant_changes,
+            unit_changes,
+            parity_changes,
+            reference_changes,
+        )
+    )
+    blocking = bool(invariant_changes or human_review)
+    severity = "critical" if invariant_changes else ("high" if human_review else "normal")
+    return {
+        "status": "changed" if changed else "unchanged",
+        "severity": severity,
+        "blocking": blocking,
+        "upstream_sha": upstream_change,
+        "tracked_branch_sha": branch_change,
+        "invariant_changes": invariant_changes,
+        "local_unit_changes": unit_changes,
+        "parity_changes": parity_changes,
+        "reference_surface_changes": reference_changes,
+        "needs_human_review": sorted(human_review),
+    }
+
+
+def parity_failure_event(
+    report: dict,
+    baseline: dict | None,
+) -> dict:
+    evidence = {
+        "failed_checks": report.get("failed_checks") or [report.get("error") or "unknown"],
+        "external_evidence": report.get("external_evidence"),
+        "invariant": report.get("invariant"),
+    }
+    event_key = {
+        "kind": "zero_quota_or_parity_drift",
+        "baseline": fingerprint(baseline) if baseline else None,
+        "evidence": evidence,
+    }
+    return {
+        "schema": WATCH_EVENT_SCHEMA,
+        "event_id": "maintenance-" + fingerprint(event_key)[:24],
+        "created_at": int(time.time()),
+        "kind": "zero_quota_or_parity_drift",
+        "severity": "critical",
+        "blocking": True,
+        "requires_human_review": True,
+        "baseline_fingerprint": fingerprint(baseline) if baseline else None,
+        "current_fingerprint": None,
+        "diff": {
+            "status": "blocked",
+            "severity": "critical",
+            "blocking": True,
+            "zero_quota_or_parity_failure": evidence,
+        },
+        "current_snapshot": None,
+    }
+
+
+def human_review_event(report: dict, baseline: dict | None) -> dict:
+    evidence = {
+        "needs_human_review": sorted(report.get("needs_human_review") or []),
+    }
+    event_key = {
+        "kind": "maintenance_human_review",
+        "baseline": fingerprint(baseline) if baseline else None,
+        "evidence": evidence,
+    }
+    return {
+        "schema": WATCH_EVENT_SCHEMA,
+        "event_id": "maintenance-" + fingerprint(event_key)[:24],
+        "created_at": int(time.time()),
+        "kind": "maintenance_human_review",
+        "severity": "high",
+        "blocking": True,
+        "requires_human_review": True,
+        "baseline_fingerprint": fingerprint(baseline) if baseline else None,
+        "current_fingerprint": None,
+        "diff": {
+            "status": "blocked",
+            "severity": "high",
+            "blocking": True,
+            **evidence,
+        },
+        "current_snapshot": None,
+    }
+
+
+def compatibility_event(baseline: dict, current: dict, diff: dict) -> dict:
+    event_key = {
+        "kind": "compatibility_semantic_change",
+        "baseline": fingerprint(baseline),
+        "current": fingerprint(current),
+        "diff": diff,
+    }
+    return {
+        "schema": WATCH_EVENT_SCHEMA,
+        "event_id": "maintenance-" + fingerprint(event_key)[:24],
+        "created_at": int(time.time()),
+        "kind": "compatibility_semantic_change",
+        "severity": diff.get("severity"),
+        "blocking": bool(diff.get("blocking")),
+        "requires_human_review": bool(diff.get("needs_human_review")),
+        "baseline_fingerprint": fingerprint(baseline),
+        "current_fingerprint": fingerprint(current),
+        "diff": diff,
+        "current_snapshot": current,
+    }
+
+
+def watch_observe(
+    root: Path,
+    policy: dict,
+    branch: str,
+    upstream_ref: str,
+    context_workspace: Path | None,
+    prior_state: dict | None,
+) -> dict:
+    parity, parity_code = run_parity_report_raw(root, context_workspace)
+    if parity_code != 0 or parity.get("status") != "passed":
+        return {
+            "status": "blocked",
+            "parity_failure": parity,
+        }
+    inventory = build_inventory(
+        root,
+        policy,
+        branch,
+        upstream_ref,
+        context_workspace,
+    )
+    prior_observed = (prior_state or {}).get("last_observed")
+    outcomes, reused = retirement_outcomes_for_watch(
+        root,
+        policy,
+        branch,
+        upstream_ref,
+        inventory,
+        prior_observed,
+    )
+    review = [
+        f"local:{item.get('id')}"
+        for item in inventory.get("local_units") or []
+        if item.get("category") == "needs_human_review"
+    ]
+    review.extend(
+        f"parity:{item.get('id')}"
+        for item in inventory.get("parity_gaps") or []
+        if item.get("category") == "needs_human_review"
+    )
+    review.extend(
+        f"retirement:{unit_id}"
+        for unit_id, outcome in outcomes.items()
+        if outcome == "needs_human_review"
+    )
+    if review:
+        return {
+            "status": "blocked",
+            "needs_human_review": sorted(set(review)),
+        }
+    return {
+        "status": "passed",
+        "snapshot": watch_semantic_snapshot(inventory, outcomes),
+        "retirement_trigger": retirement_trigger(inventory),
+        "retirement_outcomes": outcomes,
+        "retirement_verification_reused": reused,
+    }
+
+
+def watch_check(
+    root: Path,
+    policy: dict,
+    branch: str,
+    upstream_ref: str,
+    context_workspace: Path | None,
+    state_root: Path,
+) -> dict:
+    clean_real_worktree_required(root)
+    with watch_state_lock(state_root):
+        state = read_watch_state(state_root)
+        observed = watch_observe(
+            root,
+            policy,
+            branch,
+            upstream_ref,
+            context_workspace,
+            state,
+        )
+        now = int(time.time())
+        baseline = (state or {}).get("baseline")
+
+        if observed.get("status") != "passed":
+            existing = (state or {}).get("pending_event")
+            if observed.get("parity_failure") is not None:
+                event = parity_failure_event(
+                    observed.get("parity_failure") or {},
+                    baseline,
+                )
+            else:
+                event = human_review_event(observed, baseline)
+            if existing and existing.get("event_id") == event["event_id"]:
+                event = existing
+                appended = False
+            else:
+                _, appended = append_watch_event(state_root, event)
+            next_state = {
+                "schema": WATCH_STATE_SCHEMA,
+                "baseline": baseline,
+                "last_observed": (state or {}).get("last_observed"),
+                "pending_event": event,
+                "last_acknowledged_event": (state or {}).get("last_acknowledged_event"),
+                "last_checked_at": now,
+                "last_check_status": "blocked",
+            }
+            atomic_write_json(watch_state_path(state_root), next_state)
+            return {
+                "status": "blocked",
+                "event": event,
+                "event_appended": appended,
+                "state": str(watch_state_path(state_root)),
+                "history": str(watch_history_path(state_root)),
+                "native_codex_model_quota_budget": 0,
+                "desktop_mutations_performed": False,
+                "real_branch_mutations_performed": False,
+            }
+
+        current = observed["snapshot"]
+        observed_record = {
+            "snapshot": current,
+            "snapshot_fingerprint": fingerprint(current),
+            "retirement_trigger": observed["retirement_trigger"],
+            "retirement_outcomes": observed["retirement_outcomes"],
+            "observed_at": now,
+        }
+        if baseline is None:
+            next_state = {
+                "schema": WATCH_STATE_SCHEMA,
+                "baseline": current,
+                "last_observed": observed_record,
+                "pending_event": None,
+                "last_acknowledged_event": (state or {}).get("last_acknowledged_event"),
+                "last_checked_at": now,
+                "last_check_status": "baseline_initialized",
+            }
+            atomic_write_json(watch_state_path(state_root), next_state)
+            return {
+                "status": "baseline_initialized",
+                "baseline_fingerprint": fingerprint(current),
+                "retirement_verification_reused": observed["retirement_verification_reused"],
+                "state": str(watch_state_path(state_root)),
+                "history": str(watch_history_path(state_root)),
+                "native_codex_model_quota_budget": 0,
+                "desktop_mutations_performed": False,
+                "real_branch_mutations_performed": False,
+            }
+
+        diff = watch_semantic_diff(baseline, current)
+        if diff["status"] == "unchanged":
+            next_state = {
+                "schema": WATCH_STATE_SCHEMA,
+                "baseline": baseline,
+                "last_observed": observed_record,
+                "pending_event": None,
+                "last_acknowledged_event": (state or {}).get("last_acknowledged_event"),
+                "last_checked_at": now,
+                "last_check_status": "unchanged",
+            }
+            atomic_write_json(watch_state_path(state_root), next_state)
+            return {
+                "status": "unchanged",
+                "baseline_fingerprint": fingerprint(baseline),
+                "retirement_verification_reused": observed["retirement_verification_reused"],
+                "state": str(watch_state_path(state_root)),
+                "history": str(watch_history_path(state_root)),
+                "native_codex_model_quota_budget": 0,
+                "desktop_mutations_performed": False,
+                "real_branch_mutations_performed": False,
+            }
+
+        candidate = compatibility_event(baseline, current, diff)
+        existing = (state or {}).get("pending_event")
+        if existing and existing.get("event_id") == candidate["event_id"]:
+            event = existing
+            appended = False
+        else:
+            event = candidate
+            _, appended = append_watch_event(state_root, event)
+        next_state = {
+            "schema": WATCH_STATE_SCHEMA,
+            "baseline": baseline,
+            "last_observed": observed_record,
+            "pending_event": event,
+            "last_acknowledged_event": (state or {}).get("last_acknowledged_event"),
+            "last_checked_at": now,
+            "last_check_status": "blocked" if event["blocking"] else "change_detected",
+        }
+        atomic_write_json(watch_state_path(state_root), next_state)
+        return {
+            "status": "blocked" if event["blocking"] else "change_detected",
+            "event": event,
+            "event_appended": appended,
+            "retirement_verification_reused": observed["retirement_verification_reused"],
+            "state": str(watch_state_path(state_root)),
+            "history": str(watch_history_path(state_root)),
+            "native_codex_model_quota_budget": 0,
+            "desktop_mutations_performed": False,
+            "real_branch_mutations_performed": False,
+        }
+
+
+def watch_status(state_root: Path) -> dict:
+    state = read_watch_state(state_root)
+    return {
+        "status": "uninitialized" if state is None else "passed",
+        "state": state,
+        "state_path": str(watch_state_path(state_root)),
+        "history_path": str(watch_history_path(state_root)),
+        "mutations_performed": False,
+    }
+
+
+def watch_ack(state_root: Path, event_id: str) -> dict:
+    with watch_state_lock(state_root):
+        state = read_watch_state(state_root)
+        if state is None:
+            raise RuntimeError("watcher state is not initialized")
+        pending = state.get("pending_event")
+        if not pending:
+            raise RuntimeError("there is no pending maintenance event")
+        if pending.get("event_id") != event_id:
+            raise RuntimeError(
+                f"pending event is {pending.get('event_id')}; refusing stale acknowledgement"
+            )
+        if pending.get("blocking"):
+            raise RuntimeError(
+                "blocking maintenance events cannot advance the baseline; resolve the drift first"
+            )
+        current = pending.get("current_snapshot")
+        if not isinstance(current, dict):
+            raise RuntimeError("pending event does not contain an acknowledgeable snapshot")
+        now = int(time.time())
+        state["baseline"] = current
+        state["pending_event"] = None
+        state["last_acknowledged_event"] = {
+            "event_id": event_id,
+            "acknowledged_at": now,
+            "baseline_fingerprint": fingerprint(current),
+        }
+        state["last_checked_at"] = now
+        state["last_check_status"] = "acknowledged"
+        atomic_write_json(watch_state_path(state_root), state)
+        return {
+            "status": "acknowledged",
+            "event_id": event_id,
+            "baseline_fingerprint": fingerprint(current),
+            "state": str(watch_state_path(state_root)),
+            "history": str(watch_history_path(state_root)),
+            "desktop_mutations_performed": False,
+            "real_branch_mutations_performed": False,
+        }
 
 
 def clean_real_worktree_required(root: Path) -> None:
@@ -882,6 +1526,21 @@ def emit(value: dict, as_json: bool) -> None:
         for reason in value.get("reasons") or []:
             print(f"reason={reason}")
         return
+    if value.get("event"):
+        event = value["event"]
+        print(f"status={value.get('status')}")
+        print(f"event={event.get('event_id')}")
+        print(f"severity={event.get('severity')}")
+        print(f"blocking={event.get('blocking')}")
+        return
+    if value.get("status") in {
+        "baseline_initialized",
+        "unchanged",
+        "acknowledged",
+        "uninitialized",
+    }:
+        print(f"status={value.get('status')}")
+        return
     for item in value.get("results") or value.get("local_units") or []:
         print(f"{item.get('id')}: {item.get('outcome') or item.get('category')}")
     print(f"status={value.get('status')}")
@@ -914,6 +1573,21 @@ def parse_args() -> argparse.Namespace:
     autopilot.add_argument("--candidate", type=Path)
     autopilot.add_argument("--fetch", action="store_true")
     autopilot.add_argument("--run-upstream-checks", action="store_true")
+
+    watcher = sub.add_parser("watch-check")
+    shared(watcher)
+    watcher.add_argument("--context-workspace", type=Path)
+    watcher.add_argument("--state-root", type=Path, default=DEFAULT_WATCH_STATE_ROOT)
+    watcher.add_argument("--fetch", action="store_true")
+
+    watcher_status = sub.add_parser("watch-status")
+    watcher_status.add_argument("--state-root", type=Path, default=DEFAULT_WATCH_STATE_ROOT)
+    watcher_status.add_argument("--json", action="store_true")
+
+    watcher_ack = sub.add_parser("watch-ack")
+    watcher_ack.add_argument("--state-root", type=Path, default=DEFAULT_WATCH_STATE_ROOT)
+    watcher_ack.add_argument("--event-id", required=True)
+    watcher_ack.add_argument("--json", action="store_true")
     return parser.parse_args()
 
 
@@ -924,8 +1598,10 @@ def main() -> int:
     try:
         policy = load_policy(root, policy_path)
         maintenance = policy.get("maintenance") or {}
-        branch = args.branch or maintenance.get("default_branch")
-        upstream_ref = args.upstream_ref or maintenance.get("default_upstream_ref")
+        branch = getattr(args, "branch", None) or maintenance.get("default_branch")
+        upstream_ref = getattr(args, "upstream_ref", None) or maintenance.get(
+            "default_upstream_ref"
+        )
         if args.command == "inventory":
             value = build_inventory(
                 root,
@@ -954,6 +1630,37 @@ def main() -> int:
                 args.candidate.resolve() if args.candidate else None,
                 fetch=args.fetch,
                 run_upstream_checks=args.run_upstream_checks,
+            )
+        elif args.command == "watch-check":
+            if args.fetch:
+                if "/" not in upstream_ref:
+                    raise RuntimeError(
+                        "--fetch requires upstream ref in <remote>/<branch> form"
+                    )
+                remote, remote_branch = upstream_ref.split("/", 1)
+                run(
+                    ["git", "fetch", remote, remote_branch, "--tags"],
+                    cwd=root,
+                    timeout=120,
+                )
+            value = watch_check(
+                root,
+                policy,
+                branch,
+                upstream_ref,
+                args.context_workspace.resolve() if args.context_workspace else None,
+                args.state_root.expanduser().resolve(),
+            )
+            value["persistent_mutations_performed"] = bool(args.fetch)
+            value["persistent_mutation_detail"] = (
+                "git fetch updated remote-tracking refs only" if args.fetch else None
+            )
+        elif args.command == "watch-status":
+            value = watch_status(args.state_root.expanduser().resolve())
+        elif args.command == "watch-ack":
+            value = watch_ack(
+                args.state_root.expanduser().resolve(),
+                args.event_id,
             )
         else:
             raise AssertionError(args.command)

@@ -102,6 +102,11 @@
       "id": "self_evolving_capability_inventory",
       "required": true,
       "description": "Current upstream and zero-quota reference surfaces produce machine-readable capability categories and semantic diffs."
+    },
+    {
+      "id": "compatibility_watcher",
+      "required": true,
+      "description": "A one-shot schedulable watcher persists acknowledged semantic baselines, deduplicates meaningful maintenance events, and fail-closes zero-quota drift without mutating the Desktop or maintenance branch."
     }
   ]
 }

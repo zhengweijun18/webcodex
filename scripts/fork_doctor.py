@@ -471,6 +471,13 @@ def check_self_maintenance(root: Path, workspace: Path | None):
     for item in units:
         category = item.get("category")
         categories[category] = categories.get(category, 0) + 1
+    watcher = value.get("watcher") or {}
+    if watcher.get("execution_model") != "external_scheduler_one_shot":
+        raise RuntimeError("self-maintenance watcher execution model drift")
+    if watcher.get("baseline_advancement") != "explicit_ack_only":
+        raise RuntimeError("self-maintenance watcher baseline advancement drift")
+    if watcher.get("zero_quota_drift") != "blocking_fail_closed":
+        raise RuntimeError("self-maintenance watcher zero-quota fail-closed drift")
     return passed(
         "self-maintenance capability policy and inventory are coherent",
         {
@@ -481,6 +488,9 @@ def check_self_maintenance(root: Path, workspace: Path | None):
             "native_codex_model_quota_budget": (
                 value.get("invariants") or {}
             ).get("native_codex_model_quota_budget"),
+            "watcher_execution_model": watcher.get("execution_model"),
+            "watcher_baseline_advancement": watcher.get("baseline_advancement"),
+            "watcher_zero_quota_drift": watcher.get("zero_quota_drift"),
         },
     )
 
