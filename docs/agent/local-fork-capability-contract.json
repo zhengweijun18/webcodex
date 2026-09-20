@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "kind": "webcodex-local-fork-capability-contract",
+  "principles": {
+    "zero_codex_model_turn": "required",
+    "no_hidden_effect_replay": "required",
+    "explicit_irreversible_boundary": "required",
+    "upstream_first": "required",
+    "generic_fork_identity": "required"
+  },
+  "capabilities": [
+    {
+      "id": "native_vue_sfc_lsp",
+      "required": true,
+      "description": "Vue SFC files route through WebCodex's native LSP surface."
+    },
+    {
+      "id": "stable_provider_environment",
+      "required": true,
+      "description": "Runner-owned MCP providers receive only explicit bounded non-secret environment mappings."
+    },
+    {
+      "id": "observable_recoverable_provider_lifecycle",
+      "required": true,
+      "description": "Provider lifecycle is observable and recoverable without hidden replay of the failed request."
+    },
+    {
+      "id": "upstream_compatibility_rehearsal",
+      "required": true,
+      "description": "A disposable worktree can rehearse upstream forward-porting without rewriting the real maintenance branch."
+    },
+    {
+      "id": "reproducible_desktop_candidate",
+      "required": true,
+      "description": "A signed local Desktop candidate can be built with source/toolchain provenance."
+    },
+    {
+      "id": "verified_install_and_rollback",
+      "required": true,
+      "description": "Desktop install and rollback are explicit, verified, backed up, and receipt-producing."
+    },
+    {
+      "id": "pinned_vue_toolchain_bootstrap",
+      "required": true,
+      "description": "The pinned Vue/TypeScript toolchain can be inspected and explicitly repaired."
+    },
+    {
+      "id": "bounded_bridge_probe",
+      "required": true,
+      "description": "A slow optional context-bridge probe degrades instead of blocking the whole doctor."
+    },
+    {
+      "id": "external_zero_quota_evidence",
+      "required": true,
+      "external": true,
+      "description": "When a context workspace is supplied, its machine-readable state must prove zero Codex model turns."
+    }
+  ]
+}

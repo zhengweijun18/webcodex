@@ -304,6 +304,34 @@ def check_upstream_state(root: Path, branch: str, upstream_ref: str):
     return passed("forward-port branch contains current upstream", data)
 
 
+def check_capability_contract(root: Path):
+    script = root / "scripts/check_capability_contract.py"
+    if not script.is_file():
+        raise RuntimeError(f"capability contract checker is missing: {script}")
+    result = run(
+        [sys.executable, str(script), "--root", str(root), "--json"],
+        cwd=root,
+        timeout=20,
+        check=False,
+    )
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("capability contract checker returned invalid JSON") from exc
+    if result.returncode != 0 or value.get("status") != "passed":
+        failed = value.get("failed_required_capabilities") or []
+        raise RuntimeError(
+            "required capability contract failed: " + ", ".join(failed)
+        )
+    return passed(
+        "required local-fork capability contract is intact",
+        {
+            "schema_version": value.get("schema_version"),
+            "capability_count": len(value.get("capabilities") or []),
+        },
+    )
+
+
 def check_zero_quota_state(root: Path, workspace: Path | None):
     if workspace is None:
         return skipped("zero-quota state contract not requested")
@@ -449,6 +477,7 @@ def main() -> int:
         "upstream-state",
         lambda: check_upstream_state(root, args.forward_branch, args.upstream_ref),
     )
+    record(checks, "capability-contract", lambda: check_capability_contract(root))
     record(
         checks,
         "zero-quota-state",
