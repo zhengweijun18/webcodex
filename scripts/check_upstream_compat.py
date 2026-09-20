@@ -60,6 +60,19 @@ def fetch_upstream(root: Path, remote: str, branch: str) -> None:
     run(["git", "fetch", remote, branch, "--tags"], cwd=root, timeout=120)
 
 
+def stable_cargo() -> str | None:
+    explicit = os.environ.get("CARGO")
+    if explicit:
+        return explicit
+    discovered = shutil.which("cargo")
+    if discovered:
+        return discovered
+    home_cargo = Path.home() / ".cargo/bin/cargo"
+    if home_cargo.is_file():
+        return str(home_cargo)
+    return None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
@@ -148,6 +161,9 @@ def main() -> int:
                 / "Library/Application Support/dev.webcodex.desktop/local-tools/vue-lsp-2.2.12"
             )
             env = {"CARGO_NET_OFFLINE": "true"}
+            cargo = stable_cargo()
+            if cargo:
+                env["CARGO"] = cargo
             server = vue_root / "bin/vue-language-server"
             tsdk = vue_root / "node_modules/typescript/lib"
             if server.is_file() and tsdk.is_dir():
