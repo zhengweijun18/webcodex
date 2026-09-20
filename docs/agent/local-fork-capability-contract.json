@@ -107,6 +107,11 @@
       "id": "compatibility_watcher",
       "required": true,
       "description": "A one-shot schedulable watcher persists acknowledged semantic baselines, deduplicates meaningful maintenance events, and fail-closes zero-quota drift without mutating the Desktop or maintenance branch."
+    },
+    {
+      "id": "observable_codex_runtime_conformance",
+      "required": true,
+      "description": "A machine-readable contract and executable harness measure 100% conformance only across declared observable zero-quota runtime scenarios, while explicitly excluding model/private-host internals."
     }
   ]
 }

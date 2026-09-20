@@ -1,0 +1,268 @@
+{
+  "schema_version": 1,
+  "kind": "webcodex-observable-codex-runtime-contract",
+  "goal": "100_percent_zero_quota_observable_codex_runtime_conformance",
+  "measurement": {
+    "percent_basis": "declared_in_scope_scenarios_only",
+    "unknown_or_private_surfaces_count_as_supported": false,
+    "full_conformance_requires_dynamic_tests": true,
+    "full_conformance_requires_zero_quota_external_evidence": true
+  },
+  "invariants": {
+    "codex_role": "reference_only",
+    "native_codex_model_quota_budget": 0,
+    "codex_model_fallback_allowed": false,
+    "unsupported_behavior": "fail_closed"
+  },
+  "in_scope_scenarios": [
+    {
+      "id": "explicit_session_resume_survives_restart",
+      "domain": "session",
+      "observable_contract": [
+        "workflow_session_persists",
+        "explicit_session_id_resumes_same_session",
+        "authority_survives_restart",
+        "no_implicit_window_resume"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/tests/reconnect.rs",
+          "all_tokens": [
+            "canonical_project_session_explicit_resume_survives_restart",
+            "restored_sessions",
+            "coding_resume_call",
+            "resumed.output[\"session_id\"]"
+          ]
+        }
+      ],
+      "dynamic_test": "canonical_project_session_explicit_resume_survives_restart"
+    },
+    {
+      "id": "lost_context_recovers_current_handoff",
+      "domain": "session",
+      "observable_contract": [
+        "history_loss_is_explicit",
+        "current_state_handoff_is_available",
+        "missing_history_is_not_invented"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/sessions/tests.rs",
+          "all_tokens": [
+            "history_lost_session_context_recovery_adds_current_handoff",
+            "history_lost",
+            "current_handoff"
+          ]
+        }
+      ],
+      "dynamic_test": "history_lost_session_context_recovery_adds_current_handoff"
+    },
+    {
+      "id": "bounded_context_recovery_before_ack",
+      "domain": "session",
+      "observable_contract": [
+        "recovery_is_bounded",
+        "omitted_history_is_reported",
+        "current_handoff_precedes_latest_ack"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/sessions/tests.rs",
+          "all_tokens": [
+            "bounded_session_context_recovery_adds_current_handoff_before_latest_ack",
+            "omitted_count",
+            "current_handoff"
+          ]
+        }
+      ],
+      "dynamic_test": "bounded_session_context_recovery_adds_current_handoff_before_latest_ack"
+    },
+    {
+      "id": "job_cancel_is_observable_and_idempotent",
+      "domain": "job",
+      "observable_contract": [
+        "stop_requested_is_nonterminal",
+        "terminal_pending_is_explicit",
+        "repeat_cancel_does_not_repeat_effect"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/tests/jobs.rs",
+          "all_tokens": [
+            "model_facing_stop_job_reports_requested_and_already_stop_requested",
+            "terminal_pending",
+            "already_stop_requested"
+          ]
+        }
+      ],
+      "dynamic_test": "model_facing_stop_job_reports_requested_and_already_stop_requested"
+    },
+    {
+      "id": "permission_denial_preserves_recovery_semantics",
+      "domain": "permission",
+      "observable_contract": [
+        "permission_denial_is_structured",
+        "denied_effect_is_not_dispatched",
+        "denial_reason_is_model_visible"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/tests/permission_gate.rs",
+          "all_tokens": [
+            "kernel_path_preserves_permission_denial_for_model_recovery",
+            "permission_denied",
+            "restricted_requires_human_authorization"
+          ]
+        }
+      ],
+      "dynamic_test": "kernel_path_preserves_permission_denial_for_model_recovery"
+    },
+    {
+      "id": "permission_decision_is_single_and_correlated",
+      "domain": "permission",
+      "observable_contract": [
+        "one_logical_invocation_one_permission_decision",
+        "permission_request_id_is_not_duplicated"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/tests/permission_gate.rs",
+          "all_tokens": [
+            "kernel_path_does_not_double_evaluate_or_duplicate_request_id",
+            "evaluate permission exactly once",
+            "duplicate permission request ids"
+          ]
+        }
+      ],
+      "dynamic_test": "kernel_path_does_not_double_evaluate_or_duplicate_request_id"
+    },
+    {
+      "id": "timeout_preserves_completed_results_and_cancels_unfinished",
+      "domain": "tool",
+      "observable_contract": [
+        "completed_partial_results_survive",
+        "unfinished_requests_are_cancelled",
+        "late_completion_is_rejected"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/tests/read_files.rs",
+          "all_tokens": [
+            "read_files_deadline_preserves_completed_results_and_cancels_unfinished_reads",
+            "reason_code\"], \"timeout\"",
+            "timed-out Runner request was not cancelled"
+          ]
+        }
+      ],
+      "dynamic_test": "read_files_deadline_preserves_completed_results_and_cancels_unfinished_reads"
+    },
+    {
+      "id": "retry_uses_remaining_absolute_deadline",
+      "domain": "tool",
+      "observable_contract": [
+        "retry_does_not_reset_deadline",
+        "expired_request_is_cancelled",
+        "late_completion_is_rejected"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/tests/search_project_texts.rs",
+          "all_tokens": [
+            "search_project_texts_retry_uses_only_remaining_absolute_deadline",
+            "retry.timeout_secs < first.timeout_secs",
+            "expired request remained pending after batch timeout"
+          ]
+        }
+      ],
+      "dynamic_test": "search_project_texts_retry_uses_only_remaining_absolute_deadline"
+    },
+    {
+      "id": "uncertain_mutation_is_not_replayed",
+      "domain": "tool",
+      "observable_contract": [
+        "post_dispatch_uncertainty_is_explicit",
+        "state_changed_is_unknown",
+        "recovery_requires_inspection_before_retry"
+      ],
+      "evidence": [
+        {
+          "path": "src/tool_runtime/tests/unified_diff.rs",
+          "all_tokens": [
+            "apply_unified_diff_dropped_waiter_after_apply_dispatch_is_outcome_unknown",
+            "execution_state\"], \"outcome_unknown\"",
+            "inspect_workspace_before_retry"
+          ]
+        }
+      ],
+      "dynamic_test": "apply_unified_diff_dropped_waiter_after_apply_dispatch_is_outcome_unknown"
+    },
+    {
+      "id": "bounded_file_read_is_content_addressed",
+      "domain": "file",
+      "observable_contract": [
+        "bounded_range_read",
+        "content_digest",
+        "stable_structured_result"
+      ],
+      "evidence": [
+        {
+          "path": "crates/webcodex-runner/src/webcodex_runner/files.rs",
+          "all_tokens": [
+            "webcodex.file_read_range.v1",
+            "read_range_with_budget",
+            "sha256"
+          ]
+        },
+        {
+          "path": "crates/webcodex-runner/src/main_tests/file_read.rs",
+          "all_tokens": [
+            "runner_file_read_range_reads_large_file_subset_under_max_bytes",
+            "runner_file_read_range_errors_never_include_absolute_path"
+          ]
+        }
+      ],
+      "dynamic_test": {
+        "package": "webcodex-runner",
+        "target_args": ["--bin", "webcodex-runner"],
+        "filter": "runner_file_read_range_reads_large_file_subset_under_max_bytes"
+      }
+    },
+    {
+      "id": "zero_quota_native_mcp_semantics",
+      "domain": "mcp",
+      "observable_contract": [
+        "schema_before_call",
+        "read_only_and_non_destructive_effectful_paths",
+        "model_turn_started_false",
+        "usage_and_rate_limits_unchanged"
+      ],
+      "evidence": [
+        {
+          "path": "scripts/check_native_semantic_parity.py",
+          "all_tokens": [
+            "validate_external_state",
+            "model_turn_started",
+            "usage_before_after_equal",
+            "rate_limits_before_after_equal"
+          ]
+        }
+      ],
+      "dynamic_test": null,
+      "requires_external_zero_quota_evidence": true
+    }
+  ],
+  "explicitly_out_of_scope": [
+    {
+      "id": "codex_model_reasoning",
+      "reason": "Model planning, reasoning and tool-selection intelligence cannot be made identical without using the native Codex model backend."
+    },
+    {
+      "id": "openai_private_host_internals",
+      "reason": "Private host orchestration and unobservable internal state are not independently implementable or testable."
+    },
+    {
+      "id": "native_tui_visual_presentation",
+      "reason": "Visual shell presentation is not part of the observable runtime contract; equivalent control/status semantics are the target."
+    }
+  ]
+}

@@ -70,8 +70,15 @@
       ]
     },
     "native_thread_process_resume": {
-      "expected_route": "unavailable",
-      "observable_contract": ["fail_closed_without_codex_model_fallback"]
+      "expected_route": "webcodex_native",
+      "observable_contract": [
+        "durable_session_survives_restart",
+        "explicit_resume_returns_same_session",
+        "bounded_context_recovery",
+        "history_loss_returns_current_handoff",
+        "active_job_state_is_reobservable",
+        "no_codex_model_thread_required"
+      ]
     },
     "native_tui_cli_shell": {
       "expected_route": "unavailable",

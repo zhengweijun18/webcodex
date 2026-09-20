@@ -359,17 +359,28 @@ def run_parity_report(root: Path, context_workspace: Path | None) -> dict:
     return payload
 
 
-def reference_surface(context_workspace: Path | None) -> dict | None:
+def reference_surface(root: Path, context_workspace: Path | None) -> dict:
+    observable_path = root / "docs/agent/observable-codex-runtime-contract.json"
+    observable = load_json(observable_path) if observable_path.is_file() else {}
+    surface = {
+        "observable_contract_goal": observable.get("goal"),
+        "observable_contract_fingerprint": (
+            fingerprint(observable) if observable else None
+        ),
+        "observable_in_scope_scenarios": len(
+            observable.get("in_scope_scenarios") or []
+        ),
+    }
     if context_workspace is None:
-        return None
+        return surface
     path = context_workspace / STATE_RELATIVE
     if not path.is_file():
-        return None
+        return surface
     value = load_json(path)
     provider = value.get("provider") or {}
     direct = value.get("direct_mcp") or {}
     native = value.get("native_runtime") or {}
-    return {
+    surface.update({
         "schema": value.get("schema"),
         "verified_at": value.get("verified_at"),
         "bridge_version": provider.get("bridge_version"),
@@ -379,7 +390,8 @@ def reference_surface(context_workspace: Path | None) -> dict | None:
         "enabled_plugin_count": native.get("enabled_plugin_count"),
         "permission_profile": native.get("permission_profile"),
         "experience_gaps": value.get("experience_gaps") or {},
-    }
+    })
+    return surface
 
 
 def categorize_parity(parity: dict, units: list[dict]) -> list[dict]:
@@ -477,7 +489,7 @@ def build_inventory(
         "watcher": policy.get("watcher") or {},
         "local_units": units,
         "parity_gaps": categorize_parity(parity, units),
-        "reference_surface": reference_surface(context_workspace),
+        "reference_surface": reference_surface(root, context_workspace),
         "mutations_performed": False,
     }
     payload["semantic_diff"] = semantic_diff(payload, baseline)

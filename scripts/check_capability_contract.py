@@ -255,6 +255,30 @@ def probe(root: Path, capability: str) -> tuple[bool, dict]:
                 ),
             ),
         )
+    if capability == "observable_codex_runtime_conformance":
+        return contains_any(
+            root,
+            (
+                (
+                    "docs/agent/observable-codex-runtime-contract.json",
+                    (
+                        '"percent_basis": "declared_in_scope_scenarios_only"',
+                        '"native_codex_model_quota_budget": 0',
+                        '"codex_model_fallback_allowed": false',
+                        '"codex_model_reasoning"',
+                        '"openai_private_host_internals"',
+                    ),
+                ),
+                (
+                    "scripts/check_observable_conformance.py",
+                    (
+                        "defined_scope_conformance_percent",
+                        "full_conformance_evidence_ready",
+                        "does_not_claim_whole_codex_equivalence",
+                    ),
+                ),
+            ),
+        )
     return False, {"error": f"unknown capability id: {capability}"}
 
 

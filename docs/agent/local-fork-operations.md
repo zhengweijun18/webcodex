@@ -239,6 +239,45 @@ append-only, flushed to disk, and semantically deduplicated. Baseline advancemen
 is therefore an explicit operator decision rather than a side effect of
 observation.
 
+## Observable Codex runtime conformance
+
+The strongest native-compatibility target is 100% conformance across the
+declared, observable, independently implementable runtime contract. This is not
+a claim that WebCodex is internally identical to Codex.
+
+The machine-readable scope is
+docs/agent/observable-codex-runtime-contract.json. Its denominator includes
+deterministic runtime behavior such as explicit Session resume across restart,
+bounded context recovery, durable Job cancellation state, permission denial and
+correlation, timeout/cancellation, bounded retry deadlines, uncertain mutation
+recovery, bounded file reads, and zero-model-turn native MCP semantics.
+
+Codex model reasoning/tool selection, OpenAI-private host internals, and native
+TUI visual presentation are explicitly outside the denominator. Unknown or
+private surfaces never count as supported.
+
+Run scripts/check_observable_conformance.py for the static contract check.
+Supplying --context-workspace adds independent zero-quota evidence. Supplying
+both --context-workspace and --run-tests executes the dynamic conformance suite.
+Only that full-evidence mode is allowed to report
+defined_scope_conformance_percent=100. Static evidence alone may report 100%
+coverage but deliberately leaves the defined-scope conformance percentage null.
+
+Dynamic scenarios are isolated: each one prints RUN before execution and
+PASS/FAIL/TIMEOUT with duration after execution, has its own bounded timeout,
+and terminates the whole spawned process group on timeout so leftover Cargo or
+compiler children cannot poison the next scenario. Use repeated
+--scenario <id> arguments to diagnose only selected scenarios; any subset is
+deliberately ineligible for defined-scope 100%. Use --report-file <path> to
+persist the final machine-readable scenario report separately from the live
+progress stream.
+
+The native_thread_process_resume parity surface is implemented as a WebCodex
+native observable equivalent: persisted Workflow Sessions survive runtime
+restart, explicit Session ids resume the same workflow, stale/lost context
+returns bounded current handoff state, and Job state remains re-observable.
+This does not create or invoke a native Codex model thread.
+
 ## Build a local Desktop candidate
 
 Build a signed `.app` directly, without depending on DMG packaging:

@@ -434,6 +434,47 @@ def check_native_semantic_parity(root: Path, workspace: Path | None):
     )
 
 
+def check_observable_conformance(root: Path, workspace: Path | None):
+    script = root / "scripts/check_observable_conformance.py"
+    if not script.is_file():
+        raise RuntimeError(f"observable conformance checker is missing: {script}")
+    command = [sys.executable, str(script), "--root", str(root), "--json"]
+    if workspace is not None:
+        command.extend(["--context-workspace", str(workspace)])
+    result = run(command, cwd=root, timeout=30, check=False)
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("observable conformance checker returned invalid JSON") from exc
+    if result.returncode != 0 or value.get("status") != "passed":
+        failed = value.get("failed_checks") or [value.get("error") or "unknown failure"]
+        raise RuntimeError("observable runtime conformance failed: " + "; ".join(failed))
+    measurement = value.get("measurement") or {}
+    if measurement.get("static_or_requested_evidence_percent") != 100.0:
+        raise RuntimeError("observable runtime contract static coverage is not 100%")
+    external = value.get("external_zero_quota_evidence") or {}
+    if workspace is not None and external.get("status") != "passed":
+        raise RuntimeError("observable runtime contract zero-quota evidence did not pass")
+    return passed(
+        "declared observable Codex runtime contract is fully covered by static evidence",
+        {
+            "goal": value.get("goal"),
+            "in_scope_total": measurement.get("in_scope_total"),
+            "static_or_requested_evidence_percent": measurement.get(
+                "static_or_requested_evidence_percent"
+            ),
+            "defined_scope_conformance_percent": measurement.get(
+                "defined_scope_conformance_percent"
+            ),
+            "dynamic_tests_requested": False,
+            "external_zero_quota_evidence": external.get("status"),
+            "does_not_claim_whole_codex_equivalence": measurement.get(
+                "does_not_claim_whole_codex_equivalence"
+            ),
+        },
+    )
+
+
 def check_self_maintenance(root: Path, workspace: Path | None):
     script = root / "scripts/self_maintenance.py"
     if not script.is_file():
@@ -590,6 +631,11 @@ def main() -> int:
         checks,
         "native-semantic-parity",
         lambda: check_native_semantic_parity(root, args.context_workspace),
+    )
+    record(
+        checks,
+        "observable-runtime-conformance",
+        lambda: check_observable_conformance(root, args.context_workspace),
     )
     record(
         checks,

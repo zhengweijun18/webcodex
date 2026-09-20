@@ -73,6 +73,37 @@ def static_probe(root: Path, probe: str) -> tuple[bool, dict]:
             ("session_recovery", "history_lost", "current_handoff"),
         )
         return source_ok and tests_ok, {"source": source, "tests": tests}
+    if probe == "session_resume_equivalent":
+        restart_ok, restart = contains_tokens(
+            root / "src/tool_runtime/tests/reconnect.rs",
+            (
+                "canonical_project_session_explicit_resume_survives_restart",
+                "restored_sessions",
+                "coding_resume_call",
+                'resumed.output["session_id"]',
+            ),
+        )
+        recovery_ok, recovery = contains_tokens(
+            root / "src/tool_runtime/sessions/tests.rs",
+            (
+                "history_lost_session_context_recovery_adds_current_handoff",
+                "bounded_session_context_recovery_adds_current_handoff_before_latest_ack",
+                "current_handoff",
+            ),
+        )
+        jobs_ok, jobs = contains_tokens(
+            root / "src/tool_runtime/tests/jobs.rs",
+            (
+                "model_facing_stop_job_reports_requested_and_already_stop_requested",
+                "terminal_pending",
+                "recovery_kind",
+            ),
+        )
+        return restart_ok and recovery_ok and jobs_ok, {
+            "restart_resume": restart,
+            "context_recovery": recovery,
+            "job_reobservation": jobs,
+        }
     if probe == "intentionally_unavailable":
         return True, {"intentional": True}
     if probe == "zero_quota_bridge":

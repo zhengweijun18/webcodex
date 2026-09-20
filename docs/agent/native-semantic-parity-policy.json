@@ -80,11 +80,11 @@
     },
     {
       "id": "native_thread_process_resume",
-      "required": false,
-      "parity_target": "intentional_gap",
-      "route_order": ["unavailable"],
-      "probe": "intentionally_unavailable",
-      "reason": "Native Codex thread/process execution would cross the zero-model-quota boundary."
+      "required": true,
+      "parity_target": "webcodex_native_observable_equivalent",
+      "route_order": ["webcodex_native", "unavailable"],
+      "probe": "session_resume_equivalent",
+      "reason": "WebCodex provides the observable resume outcome with durable Workflow Sessions, explicit session targeting, context recovery and durable Job observation without invoking a Codex model thread."
     },
     {
       "id": "native_tui_cli_shell",
