@@ -48,8 +48,11 @@
       "local_implementation_paths": [
         "crates/webcodex-lsp/src/language.rs",
         "crates/webcodex-lsp/src/supervisor.rs",
+        "crates/webcodex-lsp/src/tests.rs",
         "crates/webcodex-runner/src/webcodex_runner/lsp/language.rs",
-        "crates/webcodex-runner/src/webcodex_runner/lsp/supervisor.rs"
+        "crates/webcodex-runner/src/webcodex_runner/lsp/supervisor.rs",
+        "crates/webcodex-runner/src/webcodex_runner/lsp/navigation_tests.rs",
+        "crates/webcodex-runner/src/webcodex_runner/lsp/tests.rs"
       ],
       "fallback": "retain_local_implementation",
       "verification": "vue_lsp_regression",
@@ -70,9 +73,12 @@
         ]
       },
       "local_implementation_paths": [
+        "crates/webcodex-runner/src/main_tests/registration.rs",
+        "crates/webcodex-runner/src/main_tests/runner_config.rs",
         "crates/webcodex-runner/src/webcodex_runner/config.rs",
         "crates/webcodex-runner/src/webcodex_runner/fake_mcp_gateway.rs",
-        "crates/webcodex-runner/src/webcodex_runner/mcp_gateway.rs"
+        "crates/webcodex-runner/src/webcodex_runner/mcp_gateway.rs",
+        "crates/webcodex-runner/src/webcodex_runner/mcp_gateway_tests.rs"
       ],
       "fallback": "retain_local_implementation",
       "verification": "provider_environment_regression",
@@ -99,6 +105,7 @@
       "local_implementation_paths": [
         "crates/webcodex-core/src/mcp_gateway.rs",
         "crates/webcodex-runner/src/webcodex_runner/mcp_gateway.rs",
+        "crates/webcodex-runner/src/webcodex_runner/mcp_gateway_tests.rs",
         "src/mcp_gateway.rs"
       ],
       "local_presence": {
