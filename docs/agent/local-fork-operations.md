@@ -72,6 +72,40 @@ keys are rejected, and neither map is advertised in Runner provider inventory.
 The provider child still receives an `env_clear()` environment; this feature
 adds explicit configuration, not implicit host inheritance.
 
+## MCP provider lifecycle recovery
+
+The maintained runtime contract is semantic rather than implementation-specific:
+
+- provider lifecycle can be observed without starting provider work;
+- a failed/retired connection can recover only from a later explicit action;
+- no failed `tools/call` is automatically replayed;
+- stale provider identities are never silently retargeted.
+
+On the v0.4.1 maintenance line, `mcp_tool action=status` is passive and a
+failure-locked provider can be cleared only with
+`action=reset, confirm=true`. Reset does not start the provider and clears
+cached schema observations, so a later effectful call requires a fresh
+`describe`.
+
+On the latest-upstream line, upstream already provides passive provider status
+plus connection retirement: a fatal connection is retired and a later explicit
+list/describe may reconnect under the same logical provider identity. The fork
+keeps that newer upstream behavior instead of forcing the legacy reset model
+onto it.
+
+## Capability contract
+
+`docs/agent/local-fork-capability-contract.json` describes the stable semantic
+capabilities that matter to this fork. Verify them without mutation:
+
+```bash
+python3 scripts/check_capability_contract.py
+```
+
+The main doctor runs this check automatically. This deliberately verifies
+capabilities rather than exact implementation shape, allowing an upstream
+implementation to replace a local patch when it satisfies the same contract.
+
 ## Rehearse an upstream update
 
 Fetch upstream separately, then rehearse the forward-port in a disposable
