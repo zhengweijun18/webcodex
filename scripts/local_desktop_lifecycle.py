@@ -448,7 +448,16 @@ def build_prune_plan(args: argparse.Namespace, current: dict) -> dict:
 def newest_other_identity_backup(args: argparse.Namespace, current: dict) -> dict | None:
     if not args.backup_dir.is_dir():
         return None
-    for app in sorted(args.backup_dir.glob("*.app"), reverse=True):
+    def backup_time(app: Path) -> float:
+        stat = app.stat()
+        return float(getattr(stat, "st_birthtime", stat.st_mtime))
+
+    backups = sorted(
+        args.backup_dir.glob("*.app"),
+        key=backup_time,
+        reverse=True,
+    )
+    for app in backups:
         try:
             identity = verify_app(app)
         except Exception:

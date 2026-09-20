@@ -7,6 +7,7 @@ import argparse
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -184,6 +185,28 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(state["installed"]["state"], "healthy")
         self.assertEqual(state["last_known_good"]["commit"], "good")
         self.assertFalse(json.loads(output.getvalue())["desktop_mutations_performed"])
+
+    def test_newest_other_identity_backup_uses_backup_time_not_commit_name(self) -> None:
+        current = identity("current")
+        older = identity("zzzz-old")
+        newer = identity("aaaa-new")
+        with tempfile.TemporaryDirectory() as temp:
+            backup_dir = Path(temp)
+            old_path = backup_dir / "WebCodex-Desktop-backup-zzzz-old.app"
+            new_path = backup_dir / "WebCodex-Desktop-backup-aaaa-new.app"
+            old_path.mkdir()
+            new_path.mkdir()
+            os.utime(old_path, (10, 10))
+            os.utime(new_path, (20, 20))
+            args = argparse.Namespace(backup_dir=backup_dir)
+
+            def fake_verify(path):
+                return older if path == old_path else newer
+
+            with mock.patch.object(lifecycle, "verify_app", side_effect=fake_verify):
+                result = lifecycle.newest_other_identity_backup(args, current)
+        self.assertEqual(result["identity"]["commit"], "aaaa-new")
+        self.assertEqual(result["app"], str(new_path))
 
     def test_mutation_history_is_append_only_deduplicated_and_receipt_compatible(self) -> None:
         payload = {
