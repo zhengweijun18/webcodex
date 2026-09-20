@@ -79,22 +79,21 @@ def verify_app(app: Path) -> dict:
 
 
 def desktop_process_status() -> dict[str, bool]:
-    checks = {
-        "desktop": ["pgrep", "-x", "WebCodex"],
-        "runner": [
-            "pgrep",
-            "-f",
-            "/Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-runner",
-        ],
-        "server": [
-            "pgrep",
-            "-f",
-            "/Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-server",
-        ],
+    # Parse one process-table snapshot instead of relying on BSD pgrep -f.
+    # On the supported Intel macOS host pgrep intermittently fails to match the
+    # runner argv even though ps reports the exact command.
+    result = run(["ps", "-axo", "command="], check=False)
+    if result.returncode != 0:
+        return {"desktop": False, "runner": False, "server": False}
+    commands = result.stdout.splitlines()
+    markers = {
+        "desktop": "/Contents/MacOS/WebCodex",
+        "runner": "webcodex-runtime/webcodex-runner",
+        "server": "webcodex-runtime/webcodex-server",
     }
     return {
-        name: run(command, check=False).returncode == 0
-        for name, command in checks.items()
+        name: any(marker in command for command in commands)
+        for name, marker in markers.items()
     }
 
 

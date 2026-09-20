@@ -33,6 +33,23 @@ def identity(commit: str, built_at: int = 1) -> dict:
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_desktop_process_status_uses_process_table_suffixes(self) -> None:
+        process_table = "\n".join(
+            [
+                "/Applications/WebCodex Desktop.app/Contents/MacOS/WebCodex",
+                "/Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-runner --config /tmp/runner.toml",
+                "/Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-server --stop-on-stdin-eof",
+            ]
+        )
+        with mock.patch.object(
+            lifecycle,
+            "run",
+            return_value=mock.Mock(returncode=0, stdout=process_table, stderr=""),
+        ) as process_run:
+            status = lifecycle.desktop_process_status()
+        self.assertEqual(status, {"desktop": True, "runner": True, "server": True})
+        process_run.assert_called_once_with(["ps", "-axo", "command="], check=False)
+
     def test_success_release_state_promotes_candidate_to_last_known_good(self) -> None:
         candidate = identity("new")
         previous = identity("old")
