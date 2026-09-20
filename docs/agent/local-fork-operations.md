@@ -161,6 +161,42 @@ If upstream eventually contains native Vue SFC support, the rehearsal reports
 `upstream_native_vue=true`. Treat that as a trigger to evaluate deleting this
 compatibility patch instead of carrying redundant code.
 
+## Self-maintaining compatibility policy
+
+docs/agent/self-maintenance-policy.json turns the fork capability contract into
+an operational policy. Each local runtime unit declares how upstream
+satisfaction is detected semantically, which implementation paths are local
+fallback, which regression proves equivalence, how redundant implementation is
+retired, and which rollback boundary protects adoption.
+
+Generate the current machine-readable capability inventory with
+scripts/self_maintenance.py inventory. When the context workspace is available,
+pass --context-workspace /path/to/context-workspace and --json.
+
+The inventory combines upstream semantic evidence, local-diff presence, and the
+zero-quota native parity report. It classifies surfaces as already_supported,
+upstream_can_replace_local, zero_quota_adaptable, intentionally_unavailable, or
+needs_human_review. A previous inventory JSON may be supplied through
+--baseline to obtain a semantic diff of Codex reference surfaces and local unit
+categories.
+
+Run scripts/self_maintenance.py retirement --json to rehearse automatic local
+patch retirement. For a unit that upstream now satisfies, the rehearsal creates
+a disposable detached worktree, forward-ports the maintenance branch, restores
+that unit's implementation paths from upstream, and runs the unit regression.
+It reports retirable only when the upstream implementation still satisfies the
+policy after the local implementation is removed. The real maintenance branch
+is never reset, rebased, or edited by this flow.
+
+Run scripts/self_maintenance.py autopilot with the same context-workspace option
+for the default maintenance autopilot. It combines the upstream forward-port
+rehearsal, capability inventory, patch-retirement rehearsal, and optional
+candidate verification into safe_to_upgrade, needs_adapter, or blocked.
+By default it does not fetch, build, install, adopt, restart, publish, or mutate
+the Desktop. Supplying --fetch explicitly permits only the remote-tracking-ref
+update; Desktop adoption always remains a separate explicitly confirmed
+lifecycle action.
+
 ## Build a local Desktop candidate
 
 Build a signed `.app` directly, without depending on DMG packaging:
@@ -237,13 +273,36 @@ python3 scripts/local_desktop_lifecycle.py adopt \
 
 `adopt` verifies identity **before** requesting Desktop quit. Repeating the same
 command after a successful adoption therefore becomes a no-op and cannot create
-self-backups or restart an already-current Desktop. A real version change asks
-the app to quit, waits up to 40 seconds without force-killing it, performs the
-normal verified install/backup/receipt sequence, and relaunches the app. Use
-`--no-relaunch` only when an intentionally stopped post-install state is wanted.
-Lifecycle mutations are also serialized by a local file lock, so concurrent
-install/adopt/rollback/prune attempts cannot race through replacement or backup
-steps.
+self-backups or restart an already-current Desktop. A real version change is a
+transaction: candidate verify, quit once, backup, install, verify, relaunch
+once, bounded health check, then receipt/history and Last Known Good promotion.
+
+The default health window is 30 seconds. The candidate becomes Last Known Good
+only after the installed identity is verified and the relaunched Desktop
+process is observed healthy inside that window. If health fails, adoption stops
+the failed candidate, restores the pre-transaction backup under the same
+lifecycle lock, verifies the restored identity, relaunches the previous Desktop
+when it was running before the transaction, and records an
+adopt_auto_rollback history event. Use --health-timeout to change the bounded
+health window.
+
+--no-relaunch deliberately produces a verified-but-unlaunched adopted state and
+does not promote that candidate to Last Known Good. Lifecycle mutations are
+serialized by a local file lock, so concurrent install/adopt/rollback/prune
+attempts cannot race through replacement or backup steps.
+
+The lifecycle state machine is persisted in desktop-release-state.json beside
+the install receipt. It records the installed state, current candidate, Last
+Known Good identity, rollback target, failed candidate, and last transaction.
+This removes guesswork about which version is merely validated, which was
+adopted, which is healthy, and which backup is the recovery target.
+
+An already-running verified Desktop can seed the state machine without any
+install or restart by running local_desktop_lifecycle.py promote-current with
+--confirm PROMOTE. Promotion is refused unless both Runner and Server are
+currently observed. The command records the current identity as Last Known Good
+and selects the newest verified different-identity backup as its rollback
+target.
 
 Preview redundant backups that have the exact same identity as the currently
 installed Desktop:

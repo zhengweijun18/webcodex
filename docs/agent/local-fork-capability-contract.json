@@ -72,6 +72,36 @@
       "id": "native_semantic_parity_harness",
       "required": true,
       "description": "A deterministic harness compares WebCodex evidence with a declared Codex behavior reference contract without running a Codex model turn."
+    },
+    {
+      "id": "self_maintenance_capability_policy",
+      "required": true,
+      "description": "Local runtime units declare upstream satisfaction, fallback, verification, retirement and rollback policy."
+    },
+    {
+      "id": "automatic_patch_retirement",
+      "required": true,
+      "description": "Redundant local implementations can be retired in disposable worktrees and verified without rewriting the real maintenance branch."
+    },
+    {
+      "id": "transactional_desktop_adoption",
+      "required": true,
+      "description": "Desktop adoption promotes a candidate only after bounded health verification and automatically restores the pre-transaction backup on health failure."
+    },
+    {
+      "id": "desktop_last_known_good_state",
+      "required": true,
+      "description": "Desktop lifecycle records candidate, installed, failed, rollback-target and last-known-good state explicitly."
+    },
+    {
+      "id": "maintenance_autopilot",
+      "required": true,
+      "description": "A default non-adopting autopilot combines upstream rehearsal, semantic inventory, patch retirement and candidate readiness into an upgrade decision."
+    },
+    {
+      "id": "self_evolving_capability_inventory",
+      "required": true,
+      "description": "Current upstream and zero-quota reference surfaces produce machine-readable capability categories and semantic diffs."
     }
   ]
 }

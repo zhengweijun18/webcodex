@@ -21,6 +21,7 @@ DEFAULT_STATE_ROOT = Path.home() / "Library/Application Support/dev.webcodex.des
 RUNTIMES = ("webcodex", "webcodex-server", "webcodex-runner")
 IDENTITY_FIELDS = ("commit", "version", "built_at")
 LIFECYCLE_LOCK_TIMEOUT = 60.0
+RELEASE_STATE_SCHEMA = "webcodex-desktop-release-state.v1"
 
 
 def run(args: list[str], *, timeout: float = 30, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -77,13 +78,32 @@ def verify_app(app: Path) -> dict:
     }
 
 
+def desktop_process_status() -> dict[str, bool]:
+    checks = {
+        "desktop": ["pgrep", "-x", "WebCodex"],
+        "runner": [
+            "pgrep",
+            "-f",
+            "/Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-runner",
+        ],
+        "server": [
+            "pgrep",
+            "-f",
+            "/Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-server",
+        ],
+    }
+    return {
+        name: run(command, check=False).returncode == 0
+        for name, command in checks.items()
+    }
+
+
 def desktop_running() -> bool:
-    checks = [
-        ["pgrep", "-x", "WebCodex"],
-        ["pgrep", "-f", "/Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-runner"],
-        ["pgrep", "-f", "/Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-server"],
-    ]
-    return any(run(command, check=False).returncode == 0 for command in checks)
+    return any(desktop_process_status().values())
+
+
+def critical_runtime_healthy(status: dict[str, bool]) -> bool:
+    return bool(status.get("runner")) and bool(status.get("server"))
 
 
 def same_identity(left: dict, right: dict) -> bool:
@@ -215,6 +235,134 @@ def record_mutation(state_root: Path, payload: dict) -> tuple[Path, Path]:
     return receipt, history
 
 
+def release_state_path(state_root: Path) -> Path:
+    return state_root / "desktop-release-state.json"
+
+
+def read_release_state(state_root: Path) -> dict | None:
+    path = release_state_path(state_root)
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"invalid Desktop release state: {path}") from exc
+    if value.get("schema") != RELEASE_STATE_SCHEMA:
+        raise RuntimeError(f"unsupported Desktop release state schema: {path}")
+    return value
+
+
+def write_release_state(state_root: Path, payload: dict) -> Path:
+    path = release_state_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value = {
+        "schema": RELEASE_STATE_SCHEMA,
+        "updated_at": int(time.time()),
+        **payload,
+    }
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(value, indent=2) + "\n")
+    os.chmod(temp, 0o600)
+    os.replace(temp, path)
+    return path
+
+
+def release_state_for_success(
+    candidate: dict,
+    installed: dict,
+    previous: dict | None,
+    backup: str | None,
+    transaction: dict,
+) -> dict:
+    return {
+        "installed": {"state": "healthy", "identity": installed},
+        "candidate": {"state": "healthy", "identity": candidate},
+        "last_known_good": installed,
+        "rollback_target": (
+            {"identity": previous, "app": backup} if previous is not None and backup else None
+        ),
+        "failed_candidate": None,
+        "last_transaction": transaction,
+    }
+
+
+def release_state_for_failure(
+    candidate: dict,
+    restored: dict | None,
+    backup: str | None,
+    transaction: dict,
+    *,
+    prior_last_known_good: dict | None = None,
+    restored_healthy: bool = False,
+) -> dict:
+    return {
+        "installed": (
+            {
+                "state": "healthy" if restored_healthy else "verified_restored",
+                "identity": restored,
+            }
+            if restored is not None
+            else {"state": "failed", "identity": candidate}
+        ),
+        "candidate": {"state": "failed", "identity": candidate},
+        "last_known_good": restored if restored_healthy else prior_last_known_good,
+        "rollback_target": (
+            {"identity": restored, "app": backup} if restored is not None and backup else None
+        ),
+        "failed_candidate": candidate,
+        "last_transaction": transaction,
+    }
+
+
+def check_installed_health(
+    app: Path,
+    expected: dict,
+    timeout: float,
+    *,
+    require_running: bool,
+) -> dict:
+    installed = verify_app(app)
+    if not same_identity(installed, expected):
+        return {
+            "status": "failed",
+            "reason": "installed_identity_mismatch",
+            "installed": installed,
+        }
+    if require_running:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            process_status = desktop_process_status()
+            if critical_runtime_healthy(process_status):
+                final = verify_app(app)
+                if same_identity(final, expected):
+                    return {
+                        "status": "passed",
+                        "require_running": True,
+                        "desktop_running": True,
+                        "process_status": process_status,
+                        "installed": final,
+                    }
+                return {
+                    "status": "failed",
+                    "reason": "runtime_identity_changed",
+                    "installed": final,
+                }
+            time.sleep(0.25)
+        return {
+            "status": "failed",
+            "reason": "desktop_health_timeout",
+            "desktop_running": desktop_running(),
+            "process_status": desktop_process_status(),
+            "timeout_secs": timeout,
+        }
+    return {
+        "status": "passed",
+        "require_running": False,
+        "desktop_running": desktop_running(),
+        "installed": installed,
+    }
+
+
 def already_installed_payload(args: argparse.Namespace, candidate: dict, installed: dict, operation: str) -> dict:
     return {
         "status": "passed",
@@ -225,11 +373,19 @@ def already_installed_payload(args: argparse.Namespace, candidate: dict, install
         "desktop_running": desktop_running(),
         "receipt": str(args.state_root / "patched-install-receipt.json"),
         "history": str(args.state_root / "patched-install-history.jsonl"),
+        "release_state": str(release_state_path(args.state_root)),
         "mutations_performed": False,
     }
 
 
-def perform_install(args: argparse.Namespace, candidate: dict, previous: dict | None, operation: str) -> dict:
+def perform_install(
+    args: argparse.Namespace,
+    candidate: dict,
+    previous: dict | None,
+    operation: str,
+    *,
+    record: bool = True,
+) -> dict:
     args.backup_dir.mkdir(parents=True, exist_ok=True)
     backup = None
     if previous is not None:
@@ -245,14 +401,19 @@ def perform_install(args: argparse.Namespace, candidate: dict, previous: dict | 
         "previous": previous,
         "backup": str(backup) if backup else None,
     }
-    receipt, history = record_mutation(args.state_root, payload)
-    return {
+    result = {
         "status": "passed",
-        "receipt": str(receipt),
-        "history": str(history),
         "mutations_performed": True,
         **payload,
     }
+    if record:
+        receipt, history = record_mutation(args.state_root, payload)
+        result["receipt"] = str(receipt)
+        result["history"] = str(history)
+    else:
+        result["receipt"] = None
+        result["history"] = None
+    return result
 
 
 def build_prune_plan(args: argparse.Namespace, current: dict) -> dict:
@@ -285,6 +446,19 @@ def build_prune_plan(args: argparse.Namespace, current: dict) -> dict:
     }
 
 
+def newest_other_identity_backup(args: argparse.Namespace, current: dict) -> dict | None:
+    if not args.backup_dir.is_dir():
+        return None
+    for app in sorted(args.backup_dir.glob("*.app"), reverse=True):
+        try:
+            identity = verify_app(app)
+        except Exception:
+            continue
+        if not same_identity(identity, current):
+            return {"identity": identity, "app": str(app)}
+    return None
+
+
 def command_status(args: argparse.Namespace) -> int:
     identity = verify_app(args.app)
     backups = []
@@ -301,9 +475,55 @@ def command_status(args: argparse.Namespace) -> int:
         "backups": backups,
         "receipt": str(args.state_root / "patched-install-receipt.json"),
         "history": str(args.state_root / "patched-install-history.jsonl"),
+        "release_state": read_release_state(args.state_root),
         "mutations_performed": False,
     }
     print(json.dumps(payload, indent=2))
+    return 0
+
+
+def command_promote_current(args: argparse.Namespace) -> int:
+    if args.confirm != "PROMOTE":
+        raise SystemExit("--confirm PROMOTE is required")
+    with lifecycle_lock(args.state_root):
+        installed = verify_app(args.app)
+        process_status = desktop_process_status()
+        if not critical_runtime_healthy(process_status):
+            raise RuntimeError(
+                "current Desktop cannot be promoted to Last Known Good: "
+                "runner and server must both be running"
+            )
+        rollback_target = newest_other_identity_backup(args, installed)
+        state = write_release_state(
+            args.state_root,
+            {
+                "installed": {"state": "healthy", "identity": installed},
+                "candidate": None,
+                "last_known_good": installed,
+                "rollback_target": rollback_target,
+                "failed_candidate": None,
+                "last_transaction": {
+                    "operation": "promote_current",
+                    "status": "healthy_observed",
+                    "process_status": process_status,
+                },
+            },
+        )
+        print(
+            json.dumps(
+                {
+                    "status": "passed",
+                    "operation": "promote_current",
+                    "last_known_good": installed,
+                    "rollback_target": rollback_target,
+                    "process_status": process_status,
+                    "release_state": str(state),
+                    "desktop_mutations_performed": False,
+                    "mutations_performed": True,
+                },
+                indent=2,
+            )
+        )
     return 0
 
 
@@ -328,8 +548,130 @@ def command_install(args: argparse.Namespace) -> int:
             return 0
         if desktop_running():
             raise SystemExit("WebCodex Desktop/Server/Runner is running; quit it before install")
-        print(json.dumps(perform_install(args, candidate, previous, "install"), indent=2))
+        result = perform_install(args, candidate, previous, "install")
+        write_release_state(
+            args.state_root,
+            {
+                "installed": {"state": "adopted", "identity": result["installed"]},
+                "candidate": {"state": "adopted", "identity": candidate},
+                "last_known_good": (
+                    (read_release_state(args.state_root) or {}).get("last_known_good")
+                ),
+                "rollback_target": (
+                    {"identity": previous, "app": result.get("backup")}
+                    if previous is not None and result.get("backup")
+                    else None
+                ),
+                "failed_candidate": None,
+                "last_transaction": {
+                    "operation": "install",
+                    "status": "verified_installed_not_health_promoted",
+                },
+            },
+        )
+        print(json.dumps(result, indent=2))
     return 0
+
+
+def request_desktop_quit() -> None:
+    quit_result = run(
+        ["osascript", "-e", 'tell application "WebCodex Desktop" to quit'],
+        check=False,
+    )
+    if quit_result.returncode != 0:
+        raise RuntimeError(f"failed to request Desktop quit: {quit_result.stderr.strip()}")
+
+
+def stop_desktop_for_transaction(timeout: float) -> None:
+    if not desktop_running():
+        return
+    request_desktop_quit()
+    if not wait_for_desktop_stopped(timeout):
+        raise RuntimeError("Desktop did not stop before transaction timeout")
+
+
+def auto_rollback_adoption(
+    args: argparse.Namespace,
+    candidate: dict,
+    previous: dict | None,
+    backup: str | None,
+    was_running: bool,
+    health: dict,
+    prior_last_known_good: dict | None,
+) -> dict:
+    restored = None
+    restore_health = None
+    backup_path = Path(backup) if backup else None
+    if desktop_running():
+        stop_desktop_for_transaction(args.quit_timeout)
+    if previous is not None and backup_path is not None:
+        source = verify_app(backup_path)
+        if not same_identity(source, previous):
+            raise RuntimeError("pre-transaction backup identity changed before auto rollback")
+        atomic_replace(backup_path, args.app)
+        restored = verify_app(args.app)
+        if not same_identity(restored, previous):
+            raise RuntimeError("auto rollback restored an unexpected Desktop identity")
+        if was_running and not args.no_relaunch:
+            run(["open", str(args.app)], check=True)
+            restore_health = check_installed_health(
+                args.app,
+                restored,
+                args.health_timeout,
+                require_running=True,
+            )
+            if restore_health.get("status") != "passed":
+                raise RuntimeError("auto rollback restored files but previous Desktop health check failed")
+    transaction = {
+        "operation": "adopt",
+        "status": "failed_auto_rolled_back" if restored is not None else "failed_no_rollback_target",
+        "candidate": candidate,
+        "health": health,
+        "restored": restored,
+        "restore_health": restore_health,
+    }
+    restored_healthy = bool(
+        restore_health is not None and restore_health.get("status") == "passed"
+    )
+    if restored is not None:
+        payload = {
+            "installed_at": int(time.time()),
+            "operation": "adopt_auto_rollback",
+            "installed": restored,
+            "replaced": candidate,
+            "rollback_source": restored,
+            "safety_backup": backup,
+            "failed_candidate": candidate,
+            "health_failure": health,
+        }
+        receipt, history = record_mutation(args.state_root, payload)
+    else:
+        receipt = args.state_root / "patched-install-receipt.json"
+        history = args.state_root / "patched-install-history.jsonl"
+    state = write_release_state(
+        args.state_root,
+        release_state_for_failure(
+            candidate,
+            restored,
+            backup,
+            transaction,
+            prior_last_known_good=prior_last_known_good,
+            restored_healthy=restored_healthy,
+        ),
+    )
+    return {
+        "status": transaction["status"],
+        "operation": "adopt",
+        "candidate": candidate,
+        "health": health,
+        "restored": restored,
+        "restore_health": restore_health,
+        "receipt": str(receipt),
+        "history": str(history),
+        "release_state": str(state),
+        "mutations_performed": True,
+        "auto_rollback_performed": restored is not None,
+    }
 
 
 def command_adopt(args: argparse.Namespace) -> int:
@@ -346,22 +688,112 @@ def command_adopt(args: argparse.Namespace) -> int:
         if previous is not None and same_identity(candidate, previous):
             print(json.dumps(already_installed_payload(args, candidate, previous, "adopt"), indent=2))
             return 0
-        was_running = desktop_running()
-        if was_running:
-            quit_result = run(
-                ["osascript", "-e", 'tell application "WebCodex Desktop" to quit'],
-                check=False,
+        prior_state = read_release_state(args.state_root) or {}
+        prior_last_known_good = prior_state.get("last_known_good")
+        pre_process_status = desktop_process_status()
+        was_running = any(pre_process_status.values())
+        if (
+            previous is not None
+            and critical_runtime_healthy(pre_process_status)
+            and (
+                prior_last_known_good is None
+                or not same_identity(prior_last_known_good, previous)
             )
-            if quit_result.returncode != 0:
-                raise RuntimeError(f"failed to request Desktop quit: {quit_result.stderr.strip()}")
-            if not wait_for_desktop_stopped(args.quit_timeout):
-                raise RuntimeError("Desktop did not stop before adopt timeout; install was not attempted")
-        result = perform_install(args, candidate, previous, "adopt")
+        ):
+            prior_last_known_good = previous
+        if was_running:
+            stop_desktop_for_transaction(args.quit_timeout)
+        result = perform_install(args, candidate, previous, "adopt", record=False)
+        write_release_state(
+            args.state_root,
+            {
+                "installed": {"state": "adopted", "identity": result["installed"]},
+                "candidate": {"state": "adopted", "identity": candidate},
+                "last_known_good": prior_last_known_good,
+                "rollback_target": (
+                    {"identity": previous, "app": result.get("backup")}
+                    if previous is not None and result.get("backup")
+                    else None
+                ),
+                "failed_candidate": None,
+                "last_transaction": {
+                    "operation": "adopt",
+                    "status": "installed_awaiting_health",
+                },
+            },
+        )
         relaunched = False
         if not args.no_relaunch:
             run(["open", str(args.app)], check=True)
             relaunched = True
+        health = check_installed_health(
+            args.app,
+            result["installed"],
+            args.health_timeout,
+            require_running=not args.no_relaunch,
+        )
+        if health.get("status") != "passed":
+            failure = auto_rollback_adoption(
+                args,
+                candidate,
+                previous,
+                result.get("backup"),
+                was_running,
+                health,
+                prior_last_known_good,
+            )
+            print(json.dumps(failure, indent=2))
+            return 1
+        result["health"] = health
         result["relaunch_requested"] = relaunched
+        result["transaction_status"] = (
+            "healthy" if not args.no_relaunch else "validated_unlaunched"
+        )
+        payload = {
+            "installed_at": result["installed_at"],
+            "operation": "adopt",
+            "installed": result["installed"],
+            "previous": previous,
+            "backup": result.get("backup"),
+            "health": health,
+        }
+        receipt, history = record_mutation(args.state_root, payload)
+        result["receipt"] = str(receipt)
+        result["history"] = str(history)
+        state = write_release_state(
+            args.state_root,
+            (
+                release_state_for_success(
+                    candidate,
+                    result["installed"],
+                    previous,
+                    result.get("backup"),
+                    {
+                        "operation": "adopt",
+                        "status": result["transaction_status"],
+                        "health": health,
+                    },
+                )
+                if not args.no_relaunch
+                else {
+                    "installed": {"state": "adopted", "identity": result["installed"]},
+                    "candidate": {"state": "adopted", "identity": candidate},
+                    "last_known_good": prior_last_known_good,
+                    "rollback_target": (
+                        {"identity": previous, "app": result.get("backup")}
+                        if previous is not None and result.get("backup")
+                        else None
+                    ),
+                    "failed_candidate": None,
+                    "last_transaction": {
+                        "operation": "adopt",
+                        "status": "validated_unlaunched",
+                        "health": health,
+                    },
+                }
+            ),
+        )
+        result["release_state"] = str(state)
         print(json.dumps(result, indent=2))
     return 0
 
@@ -425,12 +857,31 @@ def command_rollback(args: argparse.Namespace) -> int:
             "rollback_source": source,
         }
         receipt, history = record_mutation(args.state_root, payload)
+        state = write_release_state(
+            args.state_root,
+            {
+                "installed": {"state": "adopted", "identity": installed},
+                "candidate": None,
+                "last_known_good": source,
+                "rollback_target": (
+                    {"identity": current, "app": str(safety_backup)}
+                    if current is not None and safety_backup is not None
+                    else None
+                ),
+                "failed_candidate": None,
+                "last_transaction": {
+                    "operation": "rollback",
+                    "status": "verified_installed_not_health_promoted",
+                },
+            },
+        )
         print(
             json.dumps(
                 {
                     "status": "passed",
                     "receipt": str(receipt),
                     "history": str(history),
+                    "release_state": str(state),
                     **payload,
                 },
                 indent=2,
@@ -446,6 +897,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backup-dir", type=Path, default=DEFAULT_STATE_ROOT / "backups")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
+    promote = sub.add_parser("promote-current")
+    promote.add_argument("--confirm", required=True)
     verify = sub.add_parser("verify")
     verify.add_argument("--candidate", type=Path, required=True)
     install = sub.add_parser("install")
@@ -455,6 +908,7 @@ def build_parser() -> argparse.ArgumentParser:
     adopt.add_argument("--candidate", type=Path, required=True)
     adopt.add_argument("--confirm", required=True)
     adopt.add_argument("--quit-timeout", type=float, default=40.0)
+    adopt.add_argument("--health-timeout", type=float, default=30.0)
     adopt.add_argument("--no-relaunch", action="store_true")
     prune = sub.add_parser("prune-backups")
     prune.add_argument("--keep-current", type=int, default=1)
@@ -470,6 +924,8 @@ def main() -> int:
     try:
         if args.command == "status":
             return command_status(args)
+        if args.command == "promote-current":
+            return command_promote_current(args)
         if args.command == "verify":
             return command_verify(args)
         if args.command == "install":

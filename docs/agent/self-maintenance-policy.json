@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "kind": "webcodex-self-maintenance-policy",
+  "goal": "zero_quota_self_maintaining_self_evolving_fork",
+  "invariants": {
+    "upstream_first": true,
+    "codex_role": "reference_only",
+    "native_codex_model_quota_budget": 0,
+    "codex_model_fallback_allowed": false,
+    "real_branch_mutation_during_rehearsal": false,
+    "desktop_replacement_requires_explicit_confirmation": true,
+    "maintenance_autopilot_default_mutation": false
+  },
+  "maintenance": {
+    "default_branch": "vue-lsp-native-main",
+    "default_upstream_ref": "upstream/main",
+    "retirement_strategy": "restore_upstream_implementation_in_disposable_worktree_then_verify",
+    "retirement_outcomes": [
+      "upstream_native",
+      "retirable",
+      "required_local",
+      "needs_human_review"
+    ],
+    "upgrade_outcomes": [
+      "safe_to_upgrade",
+      "needs_adapter",
+      "blocked"
+    ]
+  },
+  "local_units": [
+    {
+      "id": "vue_sfc_lsp",
+      "capability_id": "native_vue_sfc_lsp",
+      "purpose": "Provide Vue SFC language-server routing when upstream lacks it.",
+      "upstream_satisfaction": {
+        "strategy": "semantic_tokens",
+        "alternatives": [
+          {
+            "path": "crates/webcodex-lsp/src/language.rs",
+            "all_tokens": ["vue", "vue-language-server"]
+          },
+          {
+            "path": "crates/webcodex-runner/src/webcodex_runner/lsp/language.rs",
+            "all_tokens": ["vue", "vue-language-server"]
+          }
+        ]
+      },
+      "local_implementation_paths": [
+        "crates/webcodex-lsp/src/language.rs",
+        "crates/webcodex-lsp/src/supervisor.rs",
+        "crates/webcodex-runner/src/webcodex_runner/lsp/language.rs",
+        "crates/webcodex-runner/src/webcodex_runner/lsp/supervisor.rs"
+      ],
+      "fallback": "retain_local_implementation",
+      "verification": "vue_lsp_regression",
+      "retirement": "restore_upstream_implementation_and_verify",
+      "rollback": "retain_last_known_good_desktop"
+    },
+    {
+      "id": "stable_provider_environment",
+      "capability_id": "stable_provider_environment",
+      "purpose": "Provide explicit bounded provider env and env_from_env mappings.",
+      "upstream_satisfaction": {
+        "strategy": "semantic_tokens",
+        "alternatives": [
+          {
+            "path": "crates/webcodex-runner/src/webcodex_runner/config.rs",
+            "all_tokens": ["env: BTreeMap", "env_from_env"]
+          }
+        ]
+      },
+      "local_implementation_paths": [
+        "crates/webcodex-runner/src/webcodex_runner/config.rs",
+        "crates/webcodex-runner/src/webcodex_runner/fake_mcp_gateway.rs",
+        "crates/webcodex-runner/src/webcodex_runner/mcp_gateway.rs"
+      ],
+      "fallback": "retain_local_implementation",
+      "verification": "provider_environment_regression",
+      "retirement": "restore_upstream_implementation_and_verify",
+      "rollback": "retain_last_known_good_desktop"
+    },
+    {
+      "id": "recoverable_provider_lifecycle",
+      "capability_id": "observable_recoverable_provider_lifecycle",
+      "purpose": "Keep provider failure observable and explicitly recoverable without hidden effect replay.",
+      "upstream_satisfaction": {
+        "strategy": "semantic_tokens",
+        "alternatives": [
+          {
+            "path": "crates/webcodex-core/src/mcp_gateway.rs",
+            "all_tokens": ["ProviderStatus", "ProviderReset"]
+          },
+          {
+            "path": "crates/webcodex-core/src/mcp_gateway.rs",
+            "all_tokens": ["ProviderStatus", "ConnectionRetired"]
+          }
+        ]
+      },
+      "local_implementation_paths": [
+        "crates/webcodex-core/src/mcp_gateway.rs",
+        "crates/webcodex-runner/src/webcodex_runner/mcp_gateway.rs",
+        "src/mcp_gateway.rs"
+      ],
+      "local_presence": {
+        "strategy": "semantic_tokens",
+        "alternatives": [
+          {
+            "path": "crates/webcodex-core/src/mcp_gateway.rs",
+            "all_tokens": ["ProviderReset"]
+          }
+        ]
+      },
+      "fallback": "retain_local_implementation",
+      "verification": "provider_lifecycle_regression",
+      "retirement": "restore_upstream_implementation_and_verify",
+      "rollback": "retain_last_known_good_desktop"
+    }
+  ],
+  "desktop_state_machine": {
+    "states": [
+      "upstream_source",
+      "candidate",
+      "validated_candidate",
+      "adopted",
+      "healthy",
+      "last_known_good",
+      "failed"
+    ],
+    "transaction": [
+      "verify_candidate",
+      "quit_once",
+      "backup_previous",
+      "install",
+      "verify_installed",
+      "relaunch_once",
+      "bounded_health_check",
+      "commit_receipt_and_last_known_good"
+    ],
+    "health_failure": [
+      "stop_failed_candidate",
+      "restore_pre_transaction_backup",
+      "verify_restored",
+      "relaunch_previous_when_previously_running",
+      "record_failed_candidate_and_rollback"
+    ]
+  }
+}

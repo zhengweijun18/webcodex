@@ -141,6 +141,96 @@ def probe(root: Path, capability: str) -> tuple[bool, dict]:
                 ),
             ),
         )
+    if capability == "self_maintenance_capability_policy":
+        return contains_any(
+            root,
+            (
+                (
+                    "docs/agent/self-maintenance-policy.json",
+                    (
+                        '"upstream_first": true',
+                        '"codex_model_fallback_allowed": false',
+                        '"retirement_strategy"',
+                        '"desktop_state_machine"',
+                    ),
+                ),
+            ),
+        )
+    if capability == "automatic_patch_retirement":
+        return contains_any(
+            root,
+            (
+                (
+                    "scripts/self_maintenance.py",
+                    (
+                        "rehearse_retirement_unit",
+                        "restore_upstream_implementation",
+                        "mutations_performed_on_real_branch",
+                    ),
+                ),
+            ),
+        )
+    if capability == "transactional_desktop_adoption":
+        return contains_any(
+            root,
+            (
+                (
+                    "scripts/local_desktop_lifecycle.py",
+                    (
+                        "check_installed_health",
+                        "auto_rollback_adoption",
+                        "failed_auto_rolled_back",
+                    ),
+                ),
+            ),
+        )
+    if capability == "desktop_last_known_good_state":
+        return contains_any(
+            root,
+            (
+                (
+                    "scripts/local_desktop_lifecycle.py",
+                    (
+                        "desktop-release-state.json",
+                        "last_known_good",
+                        "rollback_target",
+                        "failed_candidate",
+                    ),
+                ),
+            ),
+        )
+    if capability == "maintenance_autopilot":
+        return contains_any(
+            root,
+            (
+                (
+                    "scripts/self_maintenance.py",
+                    (
+                        "autopilot_report",
+                        "safe_to_upgrade",
+                        "needs_adapter",
+                        "blocked",
+                        '"automatic": False',
+                    ),
+                ),
+            ),
+        )
+    if capability == "self_evolving_capability_inventory":
+        return contains_any(
+            root,
+            (
+                (
+                    "scripts/self_maintenance.py",
+                    (
+                        "build_inventory",
+                        "semantic_diff",
+                        "upstream_can_replace_local",
+                        "zero_quota_adaptable",
+                        "intentionally_unavailable",
+                    ),
+                ),
+            ),
+        )
     return False, {"error": f"unknown capability id: {capability}"}
 
 

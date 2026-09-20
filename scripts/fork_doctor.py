@@ -434,6 +434,57 @@ def check_native_semantic_parity(root: Path, workspace: Path | None):
     )
 
 
+def check_self_maintenance(root: Path, workspace: Path | None):
+    script = root / "scripts/self_maintenance.py"
+    if not script.is_file():
+        raise RuntimeError(f"self-maintenance orchestrator is missing: {script}")
+    command = [sys.executable, str(script), "--root", str(root), "inventory", "--json"]
+    if workspace is not None:
+        command.extend(["--context-workspace", str(workspace)])
+    result = run(command, cwd=root, timeout=30, check=False)
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("self-maintenance inventory returned invalid JSON") from exc
+    if result.returncode != 0 or value.get("status") != "passed":
+        raise RuntimeError(value.get("error") or "self-maintenance inventory failed")
+    units = value.get("local_units") or []
+    unit_review = [
+        item.get("id") for item in units if item.get("category") == "needs_human_review"
+    ]
+    if unit_review:
+        raise RuntimeError(
+            "self-maintenance local units need human review: " + ", ".join(unit_review)
+        )
+    if workspace is not None:
+        parity_review = [
+            item.get("id")
+            for item in value.get("parity_gaps") or []
+            if item.get("category") == "needs_human_review"
+        ]
+        if parity_review:
+            raise RuntimeError(
+                "self-maintenance parity gaps need human review: "
+                + ", ".join(parity_review)
+            )
+    categories = {}
+    for item in units:
+        category = item.get("category")
+        categories[category] = categories.get(category, 0) + 1
+    return passed(
+        "self-maintenance capability policy and inventory are coherent",
+        {
+            "goal": value.get("goal"),
+            "local_unit_count": len(units),
+            "local_unit_categories": categories,
+            "upstream_sha": value.get("upstream_sha"),
+            "native_codex_model_quota_budget": (
+                value.get("invariants") or {}
+            ).get("native_codex_model_quota_budget"),
+        },
+    )
+
+
 def check_context_bridge(root: Path, workspace: Path | None):
     if workspace is None:
         return skipped("context bridge self-check not requested")
@@ -529,6 +580,11 @@ def main() -> int:
         checks,
         "native-semantic-parity",
         lambda: check_native_semantic_parity(root, args.context_workspace),
+    )
+    record(
+        checks,
+        "self-maintenance",
+        lambda: check_self_maintenance(root, args.context_workspace),
     )
     record(
         checks,
