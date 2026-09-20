@@ -308,6 +308,7 @@ pub(crate) struct StartupBriefInput<'a> {
     pub(crate) project_resolution: &'a Value,
     pub(crate) resolved: &'a ResolvedProject,
     pub(crate) knowledge_association: Option<&'a Value>,
+    pub(crate) native_context: Option<&'a Value>,
     pub(crate) session: &'a SessionSummary,
     pub(crate) continuation_kind: &'a str,
     pub(crate) reused: bool,
@@ -391,6 +392,9 @@ pub(crate) fn build_startup_brief(input: StartupBriefInput<'_>) -> Value {
     });
     if let Some(association) = input.knowledge_association {
         brief["project"]["knowledge_association"] = association.clone();
+    }
+    if let Some(native_context) = input.native_context {
+        brief["native_context"] = native_context.clone();
     }
     if let Some(extensions) = input.extensions {
         debug_assert!(extensions.serialized_len() <= STARTUP_EXTENSION_CATALOG_HARD_MAX_BYTES);
@@ -2280,6 +2284,24 @@ mod tests {
         assert!(extensions.serialized_len() <= STARTUP_EXTENSION_CATALOG_HARD_MAX_BYTES);
         assert!(extensions.skills.truncated);
         assert!(extensions.plugins.truncated);
+        let native_context = json!({
+            "status": "available",
+            "provider": "codex_context",
+            "orchestration_scope": "work_on_project",
+            "host_lifecycle_intercept": false,
+            "skills": {
+                "entries": (0..8).map(|index| json!({
+                    "name": format!("native-skill-{index:02}"),
+                    "description": format!("native-skill-{index:02}-{}", "n".repeat(160)),
+                })).collect::<Vec<_>>()
+            },
+            "lifecycle": {
+                "user_prompt_submit": {
+                    "status": "completed",
+                    "results": [{"additional_context": "PONYTAIL:FULL"}],
+                }
+            }
+        });
         let project_resolution = json!({
             "source": "project",
             "outcome": "resolved_existing_project",
@@ -2294,6 +2316,7 @@ mod tests {
                 project_resolution: &project_resolution,
                 resolved: &resolved,
                 knowledge_association: None,
+                native_context: Some(&native_context),
                 session: &session,
                 continuation_kind: "continued",
                 reused: true,
@@ -2356,6 +2379,12 @@ mod tests {
         );
         assert_eq!(first["instructions"]["content_included"], true);
         assert_eq!(first["instructions"]["truncated"], true);
+        assert_eq!(first["native_context"]["provider"], "codex_context");
+        assert_eq!(
+            first["native_context"]["lifecycle"]["user_prompt_submit"]["results"][0]
+                ["additional_context"],
+            "PONYTAIL:FULL"
+        );
         for source in first["instructions"]["sources"].as_array().unwrap() {
             assert!(
                 source["content"]

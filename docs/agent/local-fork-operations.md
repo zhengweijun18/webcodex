@@ -72,6 +72,35 @@ keys are rejected, and neither map is advertised in Runner provider inventory.
 The provider child still receives an `env_clear()` environment; this feature
 adds explicit configuration, not implicit host inheritance.
 
+## Zero-quota native context orchestration
+
+`work_on_project` can optionally bootstrap native Codex context through the
+Runner-local Context Bridge without starting a Codex model turn. The default
+logical provider id is `codex_context`; override only the logical id with
+`WEBCODEX_CODEX_CONTEXT_PROVIDER` when a deployment uses a different name.
+Never configure a user-specific absolute bridge path in the Server contract.
+
+The startup path is intentionally narrow:
+
+- the bridge must be advertised by the **same Runner** that owns the resolved Project;
+- WebCodex lists the provider tools and binds the exact `bootstrap_context` schema/provider instance immediately before calling it;
+- a fresh workflow emits bridge phase `startup`; explicit Workflow Session resume emits phase `resume`;
+- the current instruction is supplied as the bridge `userPromptSubmit` payload only after Project and Session resolution succeeds;
+- the returned startup projection is bounded and strips Codex home, Skill paths, Hook commands, raw stdout/stderr, and other machine-local paths while preserving routing metadata and trusted Hook `additional_context`;
+- provider absence, scope denial, schema drift, or timeout degrades the optional context projection instead of blocking the coding task;
+- an `outcome_unknown` dispatch remains explicitly uncertain and is never retried automatically.
+
+After startup discovery, models can stay pathless for the two native context reads:
+
+- `native_skill_load(project, name)` resolves the live native catalog on the same Runner. Exact duplicate names fail closed and return bounded opaque `wc_nskill_*` candidates; retrying with `native_skill_id` selects one candidate without ever exposing its source path. Skill bodies are bounded and return only safe metadata, hash, and text.
+- `native_knowledge_load(project, key)` accepts only a semantic `reuse-manifest.json.knowledge_paths` key. WebCodex requires the resolved entry to exist inside the Project, reads its declared entry file through the normal Runner file-read path, fences it against the manifest hash when available, and supports `start_line`/`limit` continuation using the same semantic key.
+
+Neither tool broadens authority: Project-read and same-Runner ownership remain required, while the internal Context Bridge dispatch still requires local-MCP authority and exact current provider schema. Neither tool accepts a filesystem path from the model.
+
+This is **workflow-entry orchestration**, not private Host interception. If a
+client never invokes `work_on_project`, WebCodex does not claim to observe or
+intercept that host prompt lifecycle.
+
 ## MCP provider lifecycle recovery
 
 The maintained runtime contract is semantic rather than implementation-specific:

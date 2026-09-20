@@ -17,6 +17,25 @@ use std::time::Duration;
 pub(crate) const MCP_TOOL_NAME: &str = "mcp_tool";
 const MAX_SCHEMA_OBSERVATIONS: usize = 512;
 const GATEWAY_WAIT_TIMEOUT: Duration = Duration::from_secs(125);
+const INTERNAL_CONTEXT_GATEWAY_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InternalMcpCallFailure {
+    pub(crate) reason_code: String,
+    pub(crate) dispatch_state: Option<String>,
+}
+
+impl From<GatewayError> for InternalMcpCallFailure {
+    fn from(error: GatewayError) -> Self {
+        Self {
+            reason_code: error.code,
+            dispatch_state: error
+                .dispatch_state
+                .map(dispatch_state_name)
+                .map(str::to_string),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct ObservationKey {
@@ -202,6 +221,104 @@ pub(crate) async fn call(
         )),
     };
     render_gateway_result(result)
+}
+
+/// Internal schema-bound call used by runtime orchestration that must stay on
+/// the same Runner as an already-resolved Project. Unlike the public model
+/// gateway this does not rely on a prior model-issued describe call, but it
+/// still observes tools/list and binds that exact provider instance/schema
+/// immediately before dispatch. It never retargets or retries.
+pub(crate) async fn call_tool_on_runner(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    provider_id: &str,
+    tool_name: &str,
+    arguments: Value,
+    auth: Option<&AuthContext>,
+) -> Result<McpGatewayToolResult, InternalMcpCallFailure> {
+    if !authorized(auth) {
+        return Err(InternalMcpCallFailure {
+            reason_code: "insufficient_scope".to_string(),
+            dispatch_state: Some("not_started".to_string()),
+        });
+    }
+    validate_provider_id(provider_id).map_err(|_| InternalMcpCallFailure {
+        reason_code: "invalid_server".to_string(),
+        dispatch_state: Some("not_started".to_string()),
+    })?;
+    validate_tool_name(tool_name).map_err(|_| InternalMcpCallFailure {
+        reason_code: "invalid_tool".to_string(),
+        dispatch_state: Some("not_started".to_string()),
+    })?;
+    if !arguments.is_object()
+        || validate_json_value(&arguments, MCP_GATEWAY_MAX_ARGUMENT_BYTES, "tool arguments")
+            .is_err()
+    {
+        return Err(InternalMcpCallFailure {
+            reason_code: "invalid_arguments".to_string(),
+            dispatch_state: Some("not_started".to_string()),
+        });
+    }
+
+    let candidates = visible_provider_candidates(runtime, auth).await;
+    let provider = resolve_provider_on_runner(&candidates, provider_id, client_id)
+        .map_err(InternalMcpCallFailure::from)?;
+    let tools = execute_exact_with_timeout(
+        runtime,
+        &provider,
+        McpGatewayRequest::ToolsList {
+            provider_id: provider.provider_id.clone(),
+            provider_instance_id: provider.provider_instance_id.clone(),
+        },
+        auth,
+        INTERNAL_CONTEXT_GATEWAY_WAIT_TIMEOUT,
+    )
+    .await
+    .and_then(response_tools)
+    .map_err(InternalMcpCallFailure::from)?;
+    let Some(tool) = tools
+        .into_iter()
+        .find(|candidate| candidate.name == tool_name)
+    else {
+        return Err(InternalMcpCallFailure {
+            reason_code: "tool_not_found".to_string(),
+            dispatch_state: Some("not_started".to_string()),
+        });
+    };
+    let expected_schema = tool.schema_observation();
+    let response = execute_exact_with_timeout(
+        runtime,
+        &provider,
+        McpGatewayRequest::ToolsCall {
+            provider_id: provider.provider_id.clone(),
+            provider_instance_id: provider.provider_instance_id.clone(),
+            name: tool_name.to_string(),
+            arguments,
+            expected_schema,
+        },
+        auth,
+        INTERNAL_CONTEXT_GATEWAY_WAIT_TIMEOUT,
+    )
+    .await
+    .map_err(InternalMcpCallFailure::from)?;
+    let dispatch_state = response.dispatch_state;
+    if let Some(error) = response.error {
+        return Err(InternalMcpCallFailure {
+            reason_code: if error.code == "stale_provider" {
+                "provider_replaced".to_string()
+            } else {
+                error.code
+            },
+            dispatch_state: Some(dispatch_state_name(dispatch_state).to_string()),
+        });
+    }
+    match response.payload {
+        Some(McpGatewayResponsePayload::ToolResult { result }) => Ok(result),
+        _ => Err(InternalMcpCallFailure {
+            reason_code: "invalid_provider_result".to_string(),
+            dispatch_state: Some(dispatch_state_name(dispatch_state).to_string()),
+        }),
+    }
 }
 
 async fn list(
@@ -517,11 +634,49 @@ fn resolve_provider(
     Ok(matches[0].clone())
 }
 
+fn resolve_provider_on_runner(
+    candidates: &BTreeMap<String, Vec<ResolvedProvider>>,
+    provider_id: &str,
+    client_id: &str,
+) -> Result<ResolvedProvider, GatewayError> {
+    let Some(candidates) = candidates.get(provider_id) else {
+        return Err(GatewayError::local(
+            "server_unavailable",
+            "the requested MCP server is not available on the Project Runner",
+        ));
+    };
+    let matches = candidates
+        .iter()
+        .filter(|provider| provider.client_id == client_id)
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [provider] => Ok((*provider).clone()),
+        [] => Err(GatewayError::local(
+            "server_unavailable_on_runner",
+            "the requested MCP server is not available on the Project Runner",
+        )),
+        _ => Err(GatewayError::local(
+            "server_ambiguous_on_runner",
+            "multiple provider instances with the same logical id are advertised by the Project Runner",
+        )),
+    }
+}
+
 async fn execute_exact(
     runtime: &ToolRuntime,
     provider: &ResolvedProvider,
     request: McpGatewayRequest,
     auth: Option<&AuthContext>,
+) -> Result<McpGatewayResponse, GatewayError> {
+    execute_exact_with_timeout(runtime, provider, request, auth, GATEWAY_WAIT_TIMEOUT).await
+}
+
+async fn execute_exact_with_timeout(
+    runtime: &ToolRuntime,
+    provider: &ResolvedProvider,
+    request: McpGatewayRequest,
+    auth: Option<&AuthContext>,
+    wait_timeout: Duration,
 ) -> Result<McpGatewayResponse, GatewayError> {
     let access = crate::runner_http::runner_access_from_auth(auth);
     let (request_id, receiver) = runtime
@@ -553,7 +708,7 @@ async fn execute_exact(
             )
         })?;
 
-    match tokio::time::timeout(GATEWAY_WAIT_TIMEOUT, receiver).await {
+    match tokio::time::timeout(wait_timeout, receiver).await {
         Ok(Ok(response)) => Ok(response),
         Ok(Err(_)) | Err(_) => {
             let dispatched = runtime
@@ -936,6 +1091,32 @@ mod tests {
             ..original
         };
         assert!(runtime.observed(&replacement).is_none());
+    }
+
+    #[test]
+    fn internal_provider_resolution_is_bound_to_the_project_runner() {
+        let provider = |client_id: &str, instance_id: &str| ResolvedProvider {
+            client_id: client_id.to_string(),
+            runner_instance_id: format!("{client_id}-runner"),
+            provider_id: "codex_context".to_string(),
+            provider_instance_id: instance_id.to_string(),
+            name: "Codex Context".to_string(),
+        };
+        let candidates = BTreeMap::from([(
+            "codex_context".to_string(),
+            vec![
+                provider("runner-a", "instance-a"),
+                provider("runner-b", "instance-b"),
+            ],
+        )]);
+
+        let selected =
+            resolve_provider_on_runner(&candidates, "codex_context", "runner-b").unwrap();
+        assert_eq!(selected.client_id, "runner-b");
+        assert_eq!(selected.provider_instance_id, "instance-b");
+        let missing =
+            resolve_provider_on_runner(&candidates, "codex_context", "runner-c").unwrap_err();
+        assert_eq!(missing.code, "server_unavailable_on_runner");
     }
 
     #[test]

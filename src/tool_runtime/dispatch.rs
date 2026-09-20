@@ -2103,6 +2103,39 @@ impl ToolRuntime {
                 self.skill_load(&project, name, auth).await
             }
 
+            ToolCall::NativeSkillLoad {
+                name,
+                native_skill_id,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err("native_skill_load requires a resolved Project")
+                    }
+                };
+                self.native_skill_load(&project, name, native_skill_id, auth)
+                    .await
+            }
+
+            ToolCall::NativeKnowledgeLoad {
+                key,
+                start_line,
+                limit,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err("native_knowledge_load requires a resolved Project")
+                    }
+                };
+                self.native_knowledge_load(&project, key, start_line, limit, auth)
+                    .await
+            }
+
             ToolCall::SkillList {
                 query,
                 offset,

@@ -102,6 +102,7 @@ struct CodingStartupOptions {
     include_repository_overview: bool,
     include_project_instructions: bool,
     include_extension_catalog: bool,
+    include_native_context: bool,
     include_reused_instruction_content: bool,
 }
 
@@ -115,6 +116,7 @@ impl CodingStartupOptions {
             include_repository_overview: true,
             include_project_instructions: true,
             include_extension_catalog: false,
+            include_native_context: false,
             include_reused_instruction_content: false,
         }
     }
@@ -131,6 +133,7 @@ impl CodingStartupOptions {
             include_repository_overview: false,
             include_project_instructions,
             include_extension_catalog,
+            include_native_context: true,
             include_reused_instruction_content: include_project_instructions,
         }
     }
@@ -1203,6 +1206,19 @@ impl ToolRuntime {
         let knowledge_association = self
             .project_knowledge_association_diagnostic(&resolved, auth)
             .await;
+        let native_context = if startup.include_native_context {
+            Some(
+                self.native_context_for_coding_startup(
+                    &resolved,
+                    title.as_deref().unwrap_or_default(),
+                    resume_requested,
+                    auth,
+                )
+                .await,
+            )
+        } else {
+            None
+        };
         let project_resolution_value =
             serde_json::to_value(&project_resolution).unwrap_or_else(|_| json!({}));
         let startup_brief = build_startup_brief(StartupBriefInput {
@@ -1212,6 +1228,7 @@ impl ToolRuntime {
             project_resolution: &project_resolution_value,
             resolved: &resolved,
             knowledge_association: knowledge_association.as_ref(),
+            native_context: native_context.as_ref(),
             session: session_summary,
             continuation_kind,
             reused: session_outcome.reused,

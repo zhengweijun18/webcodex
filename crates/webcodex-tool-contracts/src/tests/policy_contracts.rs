@@ -752,6 +752,16 @@ fn required_runner_capability_matches_metadata_risk_table() {
             RunnerCapabilityRequirement::FileRead,
         ),
         (
+            "native_skill_load",
+            ToolRisk::Read,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
+            "native_knowledge_load",
+            ToolRisk::Read,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
             "lsp_status",
             ToolRisk::Read,
             RunnerCapabilityRequirement::LspReadOnlyNavigation,

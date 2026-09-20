@@ -55,6 +55,7 @@ mod lsp_tools;
 pub(crate) use lsp_tools::runner_local_project_id;
 pub(crate) mod memory;
 pub(crate) mod model_ergonomics_telemetry;
+mod native_context;
 pub(crate) mod observations;
 mod observe_jobs;
 mod patch;

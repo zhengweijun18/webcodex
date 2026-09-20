@@ -2180,6 +2180,56 @@ fn skill_load_declares_exact_loading_and_ambiguity_output_contract() {
 }
 
 #[test]
+fn native_context_load_schemas_are_pathless_and_explicit() {
+    let specs = registered_tool_specs();
+    let skill = spec_named(&specs, "native_skill_load");
+    let skill_fields = output_schema_field_names(skill);
+    for field in [
+        "native_skill_id",
+        "name",
+        "text",
+        "sha256",
+        "candidate_count",
+        "candidates",
+        "candidates_truncated",
+        "error_kind",
+    ] {
+        assert!(
+            skill_fields.contains(field),
+            "native_skill_load missing {field}"
+        );
+    }
+    assert!(!skill_fields.contains("path"));
+    assert!(!skill_fields.contains("skill_path"));
+    let encoded_skill_schema = serde_json::to_string(&skill.output_schema).unwrap();
+    assert!(!encoded_skill_schema.contains("absolute_path"));
+    assert!(!encoded_skill_schema.contains("skill_path"));
+
+    let knowledge = spec_named(&specs, "native_knowledge_load");
+    let knowledge_fields = output_schema_field_names(knowledge);
+    for field in [
+        "key",
+        "manifest_sha256",
+        "entry_sha256",
+        "text",
+        "has_more",
+        "next_start_line",
+        "error_kind",
+    ] {
+        assert!(
+            knowledge_fields.contains(field),
+            "native_knowledge_load missing {field}"
+        );
+    }
+    assert!(!knowledge_fields.contains("path"));
+    assert!(!knowledge_fields.contains("entry_file"));
+    assert!(!knowledge_fields.contains("absolute_path"));
+    let encoded_knowledge_schema = serde_json::to_string(&knowledge.output_schema).unwrap();
+    assert!(!encoded_knowledge_schema.contains("entry_file"));
+    assert!(!encoded_knowledge_schema.contains("absolute_path"));
+}
+
+#[test]
 fn skill_recovery_output_schema_accepts_canonical_shapes_and_declares_legacy_rejection() {
     let schema = output_schema_for_tool("skill_install");
     let actionable = json!({

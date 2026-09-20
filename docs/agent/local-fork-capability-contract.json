@@ -6,7 +6,8 @@
     "no_hidden_effect_replay": "required",
     "explicit_irreversible_boundary": "required",
     "upstream_first": "required",
-    "generic_fork_identity": "required"
+    "generic_fork_identity": "required",
+    "host_private_lifecycle_intercept_claimed": "forbidden"
   },
   "capabilities": [
     {
@@ -48,6 +49,16 @@
       "id": "bounded_bridge_probe",
       "required": true,
       "description": "A slow optional context-bridge probe degrades instead of blocking the whole doctor."
+    },
+    {
+      "id": "zero_quota_native_context_orchestration",
+      "required": true,
+      "description": "Canonical work_on_project startup can automatically project bounded native Skill/Hook/knowledge/Ponytail context through a schema-bound Context Bridge on the same Runner, without starting a Codex model turn or claiming host-private lifecycle interception."
+    },
+    {
+      "id": "pathless_native_context_loading",
+      "required": true,
+      "description": "Model-visible native_skill_load and native_knowledge_load use only Skill name/opaque id or semantic knowledge key; native filesystem paths stay internal, duplicate Skill names fail closed, knowledge entries stay inside the Project, and all Bridge calls remain same-Runner schema-bound zero-quota reads."
     },
     {
       "id": "external_zero_quota_evidence",

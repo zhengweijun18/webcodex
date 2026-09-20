@@ -4869,6 +4869,28 @@ impl ToolCallAuditProjection for ToolCall {
                 "project": project,
                 "name_present": !name.is_empty(),
             }),
+            Self::NativeSkillLoad {
+                project,
+                name,
+                native_skill_id,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "name_present": !name.is_empty(),
+                "native_skill_id_present": native_skill_id.is_some(),
+            }),
+            Self::NativeKnowledgeLoad {
+                project,
+                key,
+                start_line,
+                limit,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "key_present": !key.is_empty(),
+                "start_line": start_line,
+                "limit": limit,
+            }),
             Self::RunSkillResource {
                 project,
                 skill_id,

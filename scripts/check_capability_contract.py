@@ -102,6 +102,85 @@ def probe(root: Path, capability: str) -> tuple[bool, dict]:
             ),
         )
         return ok, data
+    if capability == "zero_quota_native_context_orchestration":
+        runtime_ok, runtime_data = contains_any(
+            root,
+            (
+                (
+                    "src/tool_runtime/native_context.rs",
+                    (
+                        "native_context_for_coding_startup",
+                        "host_lifecycle_intercept",
+                        "STARTUP_NATIVE_CONTEXT_MAX_BYTES",
+                    ),
+                ),
+            ),
+        )
+        gateway_ok, gateway_data = contains_any(
+            root,
+            (
+                (
+                    "src/mcp_gateway.rs",
+                    (
+                        "call_tool_on_runner",
+                        "resolve_provider_on_runner",
+                        "INTERNAL_CONTEXT_GATEWAY_WAIT_TIMEOUT",
+                    ),
+                ),
+            ),
+        )
+        startup_ok, startup_data = contains_any(
+            root,
+            (
+                (
+                    "src/tool_runtime/coding_task.rs",
+                    ("native_context_for_coding_startup", "native_context.as_ref()"),
+                ),
+            ),
+        )
+        return runtime_ok and gateway_ok and startup_ok, {
+            "runtime_projection": runtime_data,
+            "same_runner_gateway": gateway_data,
+            "startup_integration": startup_data,
+        }
+    if capability == "pathless_native_context_loading":
+        runtime_ok, runtime_data = contains_any(
+            root,
+            (
+                (
+                    "src/tool_runtime/native_context.rs",
+                    (
+                        "native_skill_load",
+                        "native_knowledge_load",
+                        "native_skill_id",
+                        "project_relative_bridge_path",
+                    ),
+                ),
+            ),
+        )
+        contract_ok, contract_data = contains_any(
+            root,
+            (
+                (
+                    "crates/webcodex-tool-contracts/src/tool_call.rs",
+                    ("NativeSkillLoad", "NativeKnowledgeLoad"),
+                ),
+            ),
+        )
+        model_ok, model_data = contains_any(
+            root,
+            (
+                (
+                    "crates/webcodex-tool-contracts/src/tool_definition/skills.rs",
+                    ("native_skill_load", "native_knowledge_load", "OwnerOnly"),
+                ),
+            ),
+        )
+        return runtime_ok and contract_ok and model_ok, {
+            "runtime": runtime_data,
+            "contract": contract_data,
+            "model_surface": model_data,
+        }
     if capability == "external_zero_quota_evidence":
         return True, {"external": True, "checked_by": "fork_doctor.py --context-workspace"}
     return False, {"error": f"unknown capability id: {capability}"}

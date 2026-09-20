@@ -1,4 +1,4 @@
-use super::RunnerCapabilityRequirement::{FileRead, SkillManagement};
+use super::RunnerCapabilityRequirement::{FileRead, OwnerOnly, SkillManagement};
 use super::ToolVisibility::{ModelHidden, ModelVisible};
 use super::{
     adaptive_runtime_direct, def, model_spec, require_all_scopes, ToolDefinition,
@@ -72,6 +72,87 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             "Load one uniquely named Skill by exact Unicode case folding. Returns its descriptor, bounded SKILL.md, and revisions in one read-only Project call. Missing, ambiguous, or truncated discovery fails closed; scripts and other Skill resources are never executed.",
         ),
         27,
+    ),
+    adaptive_runtime_direct(
+        model_spec(
+            def(
+                "native_skill_load",
+                super::ToolAuditPolicy::typed_fields(&[
+                    super::ToolAuditResultField::value("project"),
+                    super::ToolAuditResultField::value("native_skill_id"),
+                    super::ToolAuditResultField::value("scope"),
+                    super::ToolAuditResultField::value("plugin_id"),
+                    super::ToolAuditResultField::value("sha256"),
+                    super::ToolAuditResultField::value("bytes"),
+                    super::ToolAuditResultField::value("truncated"),
+                    super::ToolAuditResultField::value("candidate_count"),
+                    super::ToolAuditResultField::value("candidates_truncated"),
+                    super::ToolAuditResultField::value("error_kind"),
+                    super::ToolAuditResultField::value("state_changed"),
+                ])
+                .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&[
+                    "name",
+                    "native_skill_id",
+                ])),
+                ModelVisible,
+                TOOL_CATEGORY_RUNTIME,
+                Some(OwnerOnly),
+                TOOL_PROVIDER_RUNNER,
+                super::ToolSemanticContract {
+                    effect: super::ToolEffect::Observe,
+                    risk: Read,
+                    approval: super::ToolApprovalPolicy::None,
+                    idempotency: super::ToolIdempotency::PureRead,
+                },
+                Some(PROJECT_READ),
+                true,
+                NoPath,
+                false,
+                false,
+                super::ToolSessionEvidencePolicy::NONE,
+            ),
+            "Load one native Codex Skill through the same Runner's Context Bridge by exact name, optionally using an opaque native_skill_id only when duplicate names are reported. Never supply or infer a native filesystem path. The bounded read is schema-bound, fail-closed, and starts no Codex model turn.",
+        ),
+        28,
+    ),
+    adaptive_runtime_direct(
+        model_spec(
+            def(
+                "native_knowledge_load",
+                super::ToolAuditPolicy::typed_fields(&[
+                    super::ToolAuditResultField::value("project"),
+                    super::ToolAuditResultField::value("manifest_sha256"),
+                    super::ToolAuditResultField::value("entry_sha256"),
+                    super::ToolAuditResultField::value("start_line"),
+                    super::ToolAuditResultField::value("end_line"),
+                    super::ToolAuditResultField::value("total_lines"),
+                    super::ToolAuditResultField::value("returned_lines"),
+                    super::ToolAuditResultField::value("has_more"),
+                    super::ToolAuditResultField::value("next_start_line"),
+                    super::ToolAuditResultField::value("error_kind"),
+                    super::ToolAuditResultField::value("state_changed"),
+                ])
+                .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&["key"])),
+                ModelVisible,
+                TOOL_CATEGORY_RUNTIME,
+                Some(OwnerOnly),
+                TOOL_PROVIDER_RUNNER,
+                super::ToolSemanticContract {
+                    effect: super::ToolEffect::Observe,
+                    risk: Read,
+                    approval: super::ToolApprovalPolicy::None,
+                    idempotency: super::ToolIdempotency::PureRead,
+                },
+                Some(PROJECT_READ),
+                true,
+                NoPath,
+                false,
+                false,
+                super::ToolSessionEvidencePolicy::NONE,
+            ),
+            "Load one project knowledge entry using only its reuse-manifest semantic key. WebCodex resolves the entry on the same Runner, requires it to remain inside the Project, checks the manifest entry hash when present, and supports line continuation by key without exposing the manifest or entry path.",
+        ),
+        29,
     ),
     adaptive_runtime_direct(
         require_all_scopes(

@@ -1125,7 +1125,10 @@ pub enum ToolCall {
 
     /// Start a normal coding workflow with practical defaults, or continue one
     /// by `session_id`. This is the canonical coding entry and returns only a
-    /// compact startup projection.
+    /// compact startup projection. When an authorized same-Runner Codex Context Bridge is configured,
+    /// startup also attempts a bounded zero-quota native Skill/Hook/knowledge context projection after
+    /// Session resolution. That workflow-entry orchestration is optional and nonblocking; it does not
+    /// claim interception of host messages that never invoke `work_on_project`.
     /// `session_id` is explicit business input for the exact Workflow Session
     /// to continue; omission always creates a fresh Session.
     WorkOnProject {
@@ -2439,6 +2442,40 @@ pub enum ToolCall {
         name: String,
         /// Optional explicit Workflow Session for this tool call. No implicit current-Session fallback is
         /// used.
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    /// Load one native Codex Skill discovered by the same Runner's Context Bridge without exposing native paths.
+    NativeSkillLoad {
+        #[schemars(length(min = 1))]
+        project: String,
+        /// Exact native Skill name. Matching is exact and case-insensitive; fuzzy/substring matching is not used.
+        #[schemars(length(min = 1, max = 96))]
+        name: String,
+        /// Optional opaque disambiguator returned when multiple native Skills share the same exact name.
+        #[schemars(regex(pattern = "^wc_nskill_[A-Za-z0-9_-]{22}$"))]
+        #[serde(default)]
+        native_skill_id: Option<String>,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    /// Load one project knowledge entry by semantic reuse-manifest key without exposing filesystem paths.
+    NativeKnowledgeLoad {
+        #[schemars(length(min = 1))]
+        project: String,
+        /// Exact semantic key from reuse-manifest.json knowledge_paths, for example l3_machine_entry.
+        #[schemars(length(min = 1, max = 96))]
+        key: String,
+        /// Optional 1-based entry-file line offset for pathless continuation.
+        #[schemars(range(min = 1))]
+        #[serde(default)]
+        start_line: Option<usize>,
+        /// Optional maximum returned lines; bounded to the normal read-files limit.
+        #[schemars(range(min = 1, max = 400))]
+        #[serde(default)]
+        limit: Option<usize>,
         #[serde(default)]
         session_id: Option<String>,
     },
@@ -5016,6 +5053,8 @@ impl ToolCall {
             Self::GoTest { .. } => "go_test",
             Self::ReadFiles { .. } => "read_files",
             Self::SkillLoad { .. } => "skill_load",
+            Self::NativeSkillLoad { .. } => "native_skill_load",
+            Self::NativeKnowledgeLoad { .. } => "native_knowledge_load",
             Self::RunSkillResource { .. } => "run_skill_resource",
             Self::SkillList { .. } => "skill_list",
             Self::SkillReadFile { .. } => "skill_read_file",
@@ -5160,6 +5199,8 @@ impl ToolCall {
             | Self::GoTest { session_id, .. }
             | Self::ReadFiles { session_id, .. }
             | Self::SkillLoad { session_id, .. }
+            | Self::NativeSkillLoad { session_id, .. }
+            | Self::NativeKnowledgeLoad { session_id, .. }
             | Self::RunSkillResource { session_id, .. }
             | Self::SkillList { session_id, .. }
             | Self::SkillReadFile { session_id, .. }
@@ -5305,6 +5346,8 @@ impl ToolCall {
             | Self::GoTest { project, .. }
             | Self::ReadFiles { project, .. }
             | Self::SkillLoad { project, .. }
+            | Self::NativeSkillLoad { project, .. }
+            | Self::NativeKnowledgeLoad { project, .. }
             | Self::RunSkillResource { project, .. }
             | Self::SkillList { project, .. }
             | Self::SkillReadFile { project, .. }

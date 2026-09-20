@@ -16,6 +16,14 @@ pub(super) fn tool_specs() -> Vec<ToolSpec> {
             "Load one uniquely named Skill by exact case-insensitive name for an authorized Project. Returns the selected descriptor plus bounded SKILL.md text and revision metadata in one read-only call. Ambiguous names fail closed; scripts and other Skill resources are never executed.",
         ),
         tool_spec(
+            "native_skill_load",
+            "Load one native Codex Skill by exact case-insensitive name through the same Runner's Context Bridge without exposing native filesystem paths. Duplicate exact names fail closed and return opaque native_skill_id candidates for disambiguation. The call is read-only, schema-bound, bounded, and never starts a Codex model turn.",
+        ),
+        tool_spec(
+            "native_knowledge_load",
+            "Load one project knowledge entry by exact semantic reuse-manifest key through the same Runner without exposing the manifest or entry path. Reads only an inside-project entry file, checks the manifest entry hash when present, supports line pagination by key, and never starts a Codex model turn.",
+        ),
+        tool_spec(
             "run_skill_resource",
             "Execute one supported scripts/*.py or scripts/*.sh resource from a trusted Runner-configured live Skill or Runner-installed managed Skill without exposing or retransmitting its source through model context. Configured Skills are live resources: expected_definition_revision fences the selected SKILL.md definition, but resource bytes are read at execution and are not package-revision-pinned; skill_sha256 reports the bytes actually executed. Managed installed Skills additionally require expected_package_revision to fence the immutable package. WebCodex selects the interpreter from the resource extension and callers supply only script arguments; project-content Skills are rejected.",
         ),

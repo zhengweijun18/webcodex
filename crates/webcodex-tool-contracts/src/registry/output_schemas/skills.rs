@@ -224,6 +224,63 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("error_kind", schema_type("string", "Stable guard/error code on failure.")),
             ("state_changed", schema_type("boolean", "Always false for Skill loading failures.")),
         ])),
+        "native_skill_load" => Some(wrapped_output_schema(vec![
+            ("project", schema_type("string", "Resolved Project id.")),
+            ("native_skill_id", schema_type("string", "Opaque pathless native Codex Skill identity.")),
+            ("name", schema_type("string", "Selected native Skill name.")),
+            ("description", nullable_schema("string", "Bounded native Skill description.")),
+            ("scope", nullable_schema("string", "Native Codex Skill scope.")),
+            ("enabled", nullable_schema("boolean", "Whether native Codex currently enables the Skill.")),
+            ("plugin_id", nullable_schema("string", "Owning native Plugin id when present.")),
+            ("resource", schema_type("string", "Loaded Skill resource name, normally SKILL.md.")),
+            ("sha256", nullable_schema("string", "Loaded resource SHA-256 when reported by the bridge.")),
+            ("bytes", nullable_schema("integer", "Loaded resource byte size when reported by the bridge.")),
+            ("text", schema_type("string", "Bounded UTF-8 native Skill text.")),
+            ("truncated", schema_type("boolean", "Whether WebCodex truncated the returned native Skill text.")),
+            ("candidate_count", json!({"type":"integer","minimum":2,"description":"Exact-name candidate count when selection is ambiguous."})),
+            ("candidates", {
+                let mut schema = array_schema(
+                    json!({
+                        "type":"object",
+                        "properties":{
+                            "native_skill_id":{"type":"string","pattern":"^wc_nskill_[A-Za-z0-9_-]{22}$"},
+                            "name":{"type":"string","maxLength":96},
+                            "scope":{"anyOf":[{"type":"string"},{"type":"null"}]},
+                            "plugin_id":{"anyOf":[{"type":"string"},{"type":"null"}]},
+                            "description":{"anyOf":[{"type":"string"},{"type":"null"}]}
+                        },
+                        "required":["native_skill_id","name","scope","plugin_id","description"],
+                        "additionalProperties":false
+                    }),
+                    "At most eight pathless exact-name native Skill ambiguity candidates.",
+                );
+                schema["maxItems"] = json!(8);
+                schema
+            }),
+            ("candidates_truncated", schema_type("boolean", "Whether more than eight ambiguity candidates exist.")),
+            ("error_kind", schema_type("string", "Stable native Skill guard/error code on failure.")),
+            ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
+            ("state_changed", schema_type("boolean", "Always false for native Skill loading.")),
+        ])),
+        "native_knowledge_load" => Some(wrapped_output_schema(vec![
+            ("project", schema_type("string", "Resolved Project id.")),
+            ("key", schema_type("string", "Exact semantic reuse-manifest knowledge key.")),
+            ("manifest_sha256", nullable_schema("string", "Current reuse-manifest SHA-256 when present.")),
+            ("entry_sha256", nullable_schema("string", "Observed entry-file SHA-256.")),
+            ("text", schema_type("string", "Bounded UTF-8 knowledge entry text.")),
+            ("start_line", nullable_schema("integer", "Effective 1-based start line.")),
+            ("end_line", nullable_schema("integer", "Last returned line, or null.")),
+            ("total_lines", nullable_schema("integer", "Total source lines when available.")),
+            ("returned_lines", nullable_schema("integer", "Returned source lines.")),
+            ("has_more", nullable_schema("boolean", "Whether more lines remain for this semantic key.")),
+            ("next_start_line", nullable_schema("integer", "Next 1-based line for pathless continuation.")),
+            ("available_keys", array_schema(schema_type("string", "Available semantic key."), "Bounded semantic keys returned only when the requested key is absent.")),
+            ("expected_sha256", nullable_schema("string", "Manifest-fenced entry hash on a changed-entry failure.")),
+            ("observed_sha256", nullable_schema("string", "Observed entry hash on a changed-entry failure.")),
+            ("error_kind", schema_type("string", "Stable native knowledge guard/error code on failure.")),
+            ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
+            ("state_changed", schema_type("boolean", "Always false for native knowledge loading.")),
+        ])),
         "skill_list" => Some(wrapped_output_schema(vec![
             ("project", schema_type("string", "Resolved Project id.")),
             (
