@@ -28,6 +28,14 @@ pub const MCP_GATEWAY_MAX_JSON_STRING_BYTES: usize = 64 * 1024;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum McpGatewayRequest {
+    ProviderStatus {
+        provider_id: String,
+        provider_instance_id: String,
+    },
+    ProviderReset {
+        provider_id: String,
+        provider_instance_id: String,
+    },
     ToolsList {
         provider_id: String,
         provider_instance_id: String,
@@ -44,15 +52,24 @@ pub enum McpGatewayRequest {
 impl McpGatewayRequest {
     pub fn provider_id(&self) -> &str {
         match self {
-            Self::ToolsList { provider_id, .. } | Self::ToolsCall { provider_id, .. } => {
-                provider_id
-            }
+            Self::ProviderStatus { provider_id, .. }
+            | Self::ProviderReset { provider_id, .. }
+            | Self::ToolsList { provider_id, .. }
+            | Self::ToolsCall { provider_id, .. } => provider_id,
         }
     }
 
     pub fn provider_instance_id(&self) -> &str {
         match self {
-            Self::ToolsList {
+            Self::ProviderStatus {
+                provider_instance_id,
+                ..
+            }
+            | Self::ProviderReset {
+                provider_instance_id,
+                ..
+            }
+            | Self::ToolsList {
                 provider_instance_id,
                 ..
             }
@@ -70,6 +87,15 @@ pub enum McpGatewayDispatchState {
     NotStarted,
     OutcomeUnknown,
     Completed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpGatewayProviderState {
+    NeverStarted,
+    Healthy,
+    Failed,
+    Busy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +176,7 @@ pub struct McpGatewayToolResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum McpGatewayResponsePayload {
+    ProviderStatus { state: McpGatewayProviderState },
     Tools { tools: Vec<McpGatewayTool> },
     ToolResult { result: McpGatewayToolResult },
 }
@@ -263,7 +290,15 @@ pub fn validate_provider_name(value: &str) -> Result<(), String> {
 
 pub fn validate_request(request: &McpGatewayRequest) -> Result<(), String> {
     match request {
-        McpGatewayRequest::ToolsList {
+        McpGatewayRequest::ProviderStatus {
+            provider_id,
+            provider_instance_id,
+        }
+        | McpGatewayRequest::ProviderReset {
+            provider_id,
+            provider_instance_id,
+        }
+        | McpGatewayRequest::ToolsList {
             provider_id,
             provider_instance_id,
         } => {
@@ -310,6 +345,7 @@ pub fn validate_response(response: &McpGatewayResponse) -> Result<(), String> {
         _ => {}
     }
     match response.payload.as_ref() {
+        Some(McpGatewayResponsePayload::ProviderStatus { .. }) => Ok(()),
         Some(McpGatewayResponsePayload::Tools { tools }) => validate_tools(tools),
         Some(McpGatewayResponsePayload::ToolResult { result }) => validate_tool_result(result),
         None => Ok(()),

@@ -8,8 +8,9 @@ use super::config::{McpGatewayConfig, McpGatewayProviderConfig, MCP_GATEWAY_MAX_
 use super::shell::is_sensitive_env_key;
 use crate::mcp_gateway::{
     validate_json_value, validate_request, validate_tool_result, validate_tools, McpGatewayContent,
-    McpGatewayDispatchState, McpGatewayProvider, McpGatewayRequest, McpGatewayResponse,
-    McpGatewayResponsePayload, McpGatewayTool, McpGatewayToolResult, MCP_GATEWAY_MAX_MESSAGE_BYTES,
+    McpGatewayDispatchState, McpGatewayProvider, McpGatewayProviderState, McpGatewayRequest,
+    McpGatewayResponse, McpGatewayResponsePayload, McpGatewayTool, McpGatewayToolResult,
+    MCP_GATEWAY_MAX_MESSAGE_BYTES,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -166,6 +167,35 @@ impl McpGatewayManager {
             );
         }
         match request {
+            McpGatewayRequest::ProviderStatus {
+                provider_id,
+                provider_instance_id,
+            } => {
+                let Some(provider) = self.exact_provider(&provider_id, &provider_instance_id)
+                else {
+                    return stale_provider();
+                };
+                McpGatewayResponse::success(McpGatewayResponsePayload::ProviderStatus {
+                    state: provider.lifecycle_state(),
+                })
+            }
+            McpGatewayRequest::ProviderReset {
+                provider_id,
+                provider_instance_id,
+            } => {
+                let Some(provider) = self.exact_provider(&provider_id, &provider_instance_id)
+                else {
+                    return stale_provider();
+                };
+                match provider.reset_failed() {
+                    Ok(state) => {
+                        McpGatewayResponse::success(McpGatewayResponsePayload::ProviderStatus {
+                            state,
+                        })
+                    }
+                    Err(error) => provider_failure_response(error),
+                }
+            }
             McpGatewayRequest::ToolsList {
                 provider_id,
                 provider_instance_id,
@@ -233,10 +263,9 @@ impl McpGatewayManager {
         provider_id: &str,
         provider_instance_id: &str,
     ) -> Option<&ProviderEntry> {
-        self.providers.get(provider_id).filter(|provider| {
-            provider.instance_id == provider_instance_id
-                && provider.failed.load(Ordering::SeqCst) == PROVIDER_AVAILABLE
-        })
+        self.providers
+            .get(provider_id)
+            .filter(|provider| provider.instance_id == provider_instance_id)
     }
 
     pub(crate) fn shutdown(&self) {
@@ -273,6 +302,46 @@ impl ProviderEntry {
             .timeout_secs
             .map(Duration::from_secs)
             .unwrap_or(default)
+    }
+
+    fn lifecycle_state(&self) -> McpGatewayProviderState {
+        if self.failed.load(Ordering::SeqCst) == PROVIDER_FAILED {
+            return McpGatewayProviderState::Failed;
+        }
+        match self.session.try_lock() {
+            Ok(session) => {
+                if session.is_some() {
+                    McpGatewayProviderState::Healthy
+                } else {
+                    McpGatewayProviderState::NeverStarted
+                }
+            }
+            Err(TryLockError::WouldBlock) => McpGatewayProviderState::Busy,
+            Err(TryLockError::Poisoned(_)) => McpGatewayProviderState::Failed,
+        }
+    }
+
+    fn reset_failed(&self) -> Result<McpGatewayProviderState, ProviderFailure> {
+        if self.failed.load(Ordering::SeqCst) != PROVIDER_FAILED {
+            return Err(ProviderFailure::not_started("provider_reset_not_needed"));
+        }
+        let mut session = match self.session.try_lock() {
+            Ok(session) => session,
+            Err(TryLockError::WouldBlock) => {
+                return Err(ProviderFailure::not_started("provider_busy"))
+            }
+            Err(TryLockError::Poisoned(_)) => {
+                return Err(ProviderFailure::before_send("provider_unavailable"))
+            }
+        };
+        if self.failed.load(Ordering::SeqCst) != PROVIDER_FAILED {
+            return Err(ProviderFailure::not_started("provider_reset_not_needed"));
+        }
+        if let Some(mut connection) = session.take() {
+            connection.terminate();
+        }
+        self.failed.store(PROVIDER_AVAILABLE, Ordering::SeqCst);
+        Ok(McpGatewayProviderState::NeverStarted)
     }
 
     fn with_connection<T>(

@@ -131,6 +131,20 @@ impl Fixture {
         })
     }
 
+    fn status(&self, provider: &McpGatewayProvider) -> McpGatewayResponse {
+        self.manager.handle(McpGatewayRequest::ProviderStatus {
+            provider_id: provider.provider_id.clone(),
+            provider_instance_id: provider.provider_instance_id.clone(),
+        })
+    }
+
+    fn reset(&self, provider: &McpGatewayProvider) -> McpGatewayResponse {
+        self.manager.handle(McpGatewayRequest::ProviderReset {
+            provider_id: provider.provider_id.clone(),
+            provider_instance_id: provider.provider_instance_id.clone(),
+        })
+    }
+
     fn call(&self, provider: &McpGatewayProvider) -> McpGatewayResponse {
         self.manager.handle(McpGatewayRequest::ToolsCall {
             provider_id: provider.provider_id.clone(),
@@ -155,6 +169,95 @@ impl Fixture {
             .filter(|line| *line == value)
             .count()
     }
+}
+
+#[test]
+fn provider_status_is_passive_and_reports_lifecycle() {
+    let fixture = Fixture::new("normal", 2);
+    let provider = fixture.provider();
+
+    let initial = fixture.status(&provider);
+    assert_eq!(initial.dispatch_state, McpGatewayDispatchState::Completed);
+    assert!(matches!(
+        initial.payload,
+        Some(McpGatewayResponsePayload::ProviderStatus {
+            state: McpGatewayProviderState::NeverStarted
+        })
+    ));
+    assert_eq!(fixture.marker_count("start"), 0);
+
+    assert!(fixture.list(&provider).error.is_none());
+    let healthy = fixture.status(&provider);
+    assert!(matches!(
+        healthy.payload,
+        Some(McpGatewayResponsePayload::ProviderStatus {
+            state: McpGatewayProviderState::Healthy
+        })
+    ));
+    assert_eq!(fixture.marker_count("start"), 1);
+}
+
+#[test]
+fn failed_provider_requires_explicit_reset_before_reinitialization() {
+    let fixture = Fixture::new("init_crash", 2);
+    let provider = fixture.provider();
+
+    let failed = fixture.list(&provider);
+    assert_eq!(failed.dispatch_state, McpGatewayDispatchState::NotStarted);
+    assert_eq!(failed.error.as_ref().unwrap().code, "provider_eof");
+    assert_eq!(fixture.marker_count("start"), 1);
+
+    let status = fixture.status(&provider);
+    assert!(matches!(
+        status.payload,
+        Some(McpGatewayResponsePayload::ProviderStatus {
+            state: McpGatewayProviderState::Failed
+        })
+    ));
+    assert_eq!(fixture.marker_count("start"), 1);
+
+    let unavailable = fixture.list(&provider);
+    assert_eq!(
+        unavailable.error.as_ref().unwrap().code,
+        "provider_unavailable"
+    );
+    assert_eq!(fixture.marker_count("start"), 1);
+
+    let reset = fixture.reset(&provider);
+    assert!(matches!(
+        reset.payload,
+        Some(McpGatewayResponsePayload::ProviderStatus {
+            state: McpGatewayProviderState::NeverStarted
+        })
+    ));
+    assert_eq!(fixture.marker_count("start"), 1);
+
+    let retried = fixture.list(&provider);
+    assert_eq!(retried.error.as_ref().unwrap().code, "provider_eof");
+    assert_eq!(fixture.marker_count("start"), 2);
+}
+
+#[test]
+fn reset_never_retires_or_restarts_healthy_provider() {
+    let fixture = Fixture::new("normal", 2);
+    let provider = fixture.provider();
+
+    let never_started = fixture.reset(&provider);
+    assert_eq!(
+        never_started.error.as_ref().unwrap().code,
+        "provider_reset_not_needed"
+    );
+    assert_eq!(fixture.marker_count("start"), 0);
+
+    assert!(fixture.list(&provider).error.is_none());
+    let healthy = fixture.reset(&provider);
+    assert_eq!(
+        healthy.error.as_ref().unwrap().code,
+        "provider_reset_not_needed"
+    );
+    assert_eq!(fixture.marker_count("start"), 1);
+    assert!(fixture.list(&provider).error.is_none());
+    assert_eq!(fixture.marker_count("start"), 1);
 }
 
 #[test]
@@ -385,7 +488,7 @@ fn provider_callback_after_dispatch_remains_unsupported_and_unknown() {
     );
     assert_eq!(
         fixture.call(&provider).error.as_ref().unwrap().code,
-        "stale_provider"
+        "provider_unavailable"
     );
     assert_eq!(fixture.marker_count("start"), 1);
 }
@@ -406,7 +509,7 @@ fn provider_notification_flood_is_bounded_and_retires_after_dispatch() {
     );
     assert_eq!(
         fixture.list(&provider).error.as_ref().unwrap().code,
-        "stale_provider"
+        "provider_unavailable"
     );
     assert_eq!(fixture.marker_count("start"), 1);
 }
@@ -425,7 +528,7 @@ fn crash_is_outcome_unknown_and_never_restarted_or_replayed() {
 
     let second = fixture.call(&provider);
     assert_eq!(second.dispatch_state, McpGatewayDispatchState::NotStarted);
-    assert_eq!(second.error.as_ref().unwrap().code, "stale_provider");
+    assert_eq!(second.error.as_ref().unwrap().code, "provider_unavailable");
     assert_eq!(fixture.marker_count("start"), 1);
     assert_eq!(fixture.marker_count("call"), 1);
 }
@@ -450,7 +553,7 @@ fn initialization_failure_is_not_misreported_as_tool_dispatch() {
         assert_eq!(fixture.marker_count("start"), 1, "{scenario}");
         assert_eq!(
             fixture.call(&provider).error.as_ref().unwrap().code,
-            "stale_provider",
+            "provider_unavailable",
             "{scenario}"
         );
         assert_eq!(fixture.marker_count("start"), 1, "{scenario}");
@@ -587,6 +690,19 @@ fn correlated_jsonrpc_error_is_completed_without_retry() {
     assert_eq!(response.dispatch_state, McpGatewayDispatchState::Completed);
     assert_eq!(response.error.as_ref().unwrap().code, "provider_rpc_error");
     assert_eq!(fixture.marker_count("call"), 1);
+}
+
+#[test]
+fn stale_provider_status_and_reset_fail_without_starting_child() {
+    let fixture = Fixture::new("normal", 2);
+    let mut provider = fixture.provider();
+    provider.provider_instance_id = "stale".to_string();
+
+    for response in [fixture.status(&provider), fixture.reset(&provider)] {
+        assert_eq!(response.dispatch_state, McpGatewayDispatchState::NotStarted);
+        assert_eq!(response.error.as_ref().unwrap().code, "stale_provider");
+    }
+    assert_eq!(fixture.marker_count("start"), 0);
 }
 
 #[test]

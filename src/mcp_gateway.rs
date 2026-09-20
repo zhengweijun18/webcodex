@@ -72,6 +72,22 @@ impl McpGatewayRuntime {
         store.values.remove(key);
         store.order.retain(|candidate| candidate != key);
     }
+    fn forget_provider(&self, provider: &ResolvedProvider) {
+        let mut store = self
+            .observations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        store.values.retain(|key, _| {
+            key.client_id != provider.client_id
+                || key.provider_id != provider.provider_id
+                || key.provider_instance_id != provider.provider_instance_id
+        });
+        store.order.retain(|key| {
+            key.client_id != provider.client_id
+                || key.provider_id != provider.provider_id
+                || key.provider_instance_id != provider.provider_instance_id
+        });
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +139,8 @@ struct McpToolArguments {
     tool: Option<String>,
     #[serde(default)]
     arguments: Option<Value>,
+    #[serde(default)]
+    confirm: Option<bool>,
 }
 
 pub(crate) fn authorized(auth: Option<&AuthContext>) -> bool {
@@ -132,13 +150,13 @@ pub(crate) fn authorized(auth: Option<&AuthContext>) -> bool {
 pub(crate) fn tool_spec() -> Value {
     json!({
         "name": MCP_TOOL_NAME,
-        "description": "Access explicitly authorized Runner-owned local MCP servers through WebCodex's built-in gateway. No-argument action=list reports registration routing resolvability, not provider process health; action=list with server and action=describe interact with the provider. Use action=describe before action=call, and re-describe when WebCodex reports a schema change. Provider process identities and schema revision tokens are intentionally hidden.",
+        "description": "Access explicitly authorized Runner-owned local MCP servers through WebCodex's built-in gateway. No-argument action=list reports routing resolvability. action=status passively observes one provider without starting it. action=reset only clears a failed local provider connection after confirm=true; it never starts, replays, or calls the provider. Use action=describe before action=call and after reset. Provider process identities and schema revision tokens are intentionally hidden.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "describe", "call"]
+                    "enum": ["list", "status", "reset", "describe", "call"]
                 },
                 "server": {
                     "type": "string",
@@ -151,6 +169,10 @@ pub(crate) fn tool_spec() -> Value {
                 "arguments": {
                     "type": "object",
                     "description": "Arguments for action=call, matching the most recent action=describe schema."
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Required and must be true only for action=reset."
                 }
             },
             "required": ["action"],
@@ -187,6 +209,12 @@ pub(crate) async fn call(
         "list" => list(runtime, parsed, auth)
             .await
             .map(GatewaySuccess::Metadata),
+        "status" => status(runtime, parsed, auth)
+            .await
+            .map(GatewaySuccess::Metadata),
+        "reset" => reset(runtime, parsed, auth)
+            .await
+            .map(GatewaySuccess::Metadata),
         "describe" => describe(runtime, parsed, auth)
             .await
             .map(GatewaySuccess::Metadata),
@@ -195,7 +223,7 @@ pub(crate) async fn call(
             .map(GatewaySuccess::UpstreamToolResult),
         _ => Err(GatewayError::local(
             "invalid_action",
-            "action must be one of list, describe, or call",
+            "action must be one of list, status, reset, describe, or call",
         )),
     };
     render_gateway_result(result)
@@ -206,10 +234,10 @@ async fn list(
     args: McpToolArguments,
     auth: Option<&AuthContext>,
 ) -> Result<Value, GatewayError> {
-    if args.tool.is_some() || args.arguments.is_some() {
+    if args.tool.is_some() || args.arguments.is_some() || args.confirm.is_some() {
         return Err(GatewayError::local(
             "invalid_arguments",
-            "action=list does not accept tool or arguments",
+            "action=list does not accept tool, arguments, or confirm",
         ));
     }
     let candidates = visible_provider_candidates(runtime, auth).await;
@@ -266,15 +294,85 @@ fn registration_routing_summary(candidates: &BTreeMap<String, Vec<ResolvedProvid
     json!({"servers": servers})
 }
 
+async fn status(
+    runtime: &ToolRuntime,
+    args: McpToolArguments,
+    auth: Option<&AuthContext>,
+) -> Result<Value, GatewayError> {
+    if args.tool.is_some() || args.arguments.is_some() || args.confirm.is_some() {
+        return Err(GatewayError::local(
+            "invalid_arguments",
+            "action=status accepts only server",
+        ));
+    }
+    let server = required_id(args.server.as_deref(), "server")?;
+    let candidates = visible_provider_candidates(runtime, auth).await;
+    let provider = resolve_provider(&candidates, server)?;
+    let response = execute_exact(
+        runtime,
+        &provider,
+        McpGatewayRequest::ProviderStatus {
+            provider_id: provider.provider_id.clone(),
+            provider_instance_id: provider.provider_instance_id.clone(),
+        },
+        auth,
+    )
+    .await?;
+    let state = response_provider_status(response)?;
+    Ok(json!({
+        "server": provider.provider_id,
+        "name": provider.name,
+        "state": state,
+        "startedProvider": false,
+    }))
+}
+
+async fn reset(
+    runtime: &ToolRuntime,
+    args: McpToolArguments,
+    auth: Option<&AuthContext>,
+) -> Result<Value, GatewayError> {
+    if args.tool.is_some() || args.arguments.is_some() || args.confirm != Some(true) {
+        return Err(GatewayError::local(
+            "confirmation_required",
+            "action=reset accepts only server plus confirm=true",
+        ));
+    }
+    let server = required_id(args.server.as_deref(), "server")?;
+    let candidates = visible_provider_candidates(runtime, auth).await;
+    let provider = resolve_provider(&candidates, server)?;
+    let response = execute_exact(
+        runtime,
+        &provider,
+        McpGatewayRequest::ProviderReset {
+            provider_id: provider.provider_id.clone(),
+            provider_instance_id: provider.provider_instance_id.clone(),
+        },
+        auth,
+    )
+    .await?;
+    let state = response_provider_status(response)?;
+    runtime.mcp_gateway.forget_provider(&provider);
+    Ok(json!({
+        "server": provider.provider_id,
+        "name": provider.name,
+        "state": state,
+        "reset": true,
+        "startedProvider": false,
+        "replayedRequest": false,
+        "next": "Run action=describe before any later action=call."
+    }))
+}
+
 async fn describe(
     runtime: &ToolRuntime,
     args: McpToolArguments,
     auth: Option<&AuthContext>,
 ) -> Result<Value, GatewayError> {
-    if args.arguments.is_some() {
+    if args.arguments.is_some() || args.confirm.is_some() {
         return Err(GatewayError::local(
             "invalid_arguments",
-            "action=describe does not accept arguments",
+            "action=describe does not accept arguments or confirm",
         ));
     }
     let server = required_id(args.server.as_deref(), "server")?;
@@ -322,6 +420,12 @@ async fn call_upstream(
     args: McpToolArguments,
     auth: Option<&AuthContext>,
 ) -> Result<McpGatewayToolResult, GatewayError> {
+    if args.confirm.is_some() {
+        return Err(GatewayError::local(
+            "invalid_arguments",
+            "action=call does not accept confirm",
+        ));
+    }
     let server = required_id(args.server.as_deref(), "server")?;
     let tool_name = required_tool(args.tool.as_deref())?;
     let arguments = args.arguments.ok_or_else(|| {
@@ -538,9 +642,12 @@ async fn execute_exact(
     }
 }
 
-fn response_tools(response: McpGatewayResponse) -> Result<Vec<McpGatewayTool>, GatewayError> {
+fn response_provider_status(
+    response: McpGatewayResponse,
+) -> Result<McpGatewayProviderState, GatewayError> {
     if let Some(error) = response.error {
-        let code = if error.code == "stale_provider" {
+        let stale_provider = error.code == "stale_provider";
+        let code = if stale_provider {
             "provider_replaced".to_string()
         } else {
             error.code
@@ -548,9 +655,44 @@ fn response_tools(response: McpGatewayResponse) -> Result<Vec<McpGatewayTool>, G
         return Err(GatewayError {
             code,
             message: error.message,
-            recovery: Some(
-                "Re-list the MCP server; WebCodex did not retarget or replay the stale operation.",
+            recovery: stale_provider.then_some(
+                "The exact provider instance changed. Re-list before checking status again.",
             ),
+            dispatch_state: Some(response.dispatch_state),
+        });
+    }
+    match response.payload {
+        Some(McpGatewayResponsePayload::ProviderStatus { state }) => Ok(state),
+        _ => Err(GatewayError::local(
+            "invalid_provider_status",
+            "Runner returned an unexpected provider status response",
+        )),
+    }
+}
+
+fn response_tools(response: McpGatewayResponse) -> Result<Vec<McpGatewayTool>, GatewayError> {
+    if let Some(error) = response.error {
+        let stale_provider = error.code == "stale_provider";
+        let code = if stale_provider {
+            "provider_replaced".to_string()
+        } else {
+            error.code
+        };
+        let recovery = if stale_provider {
+            Some(
+                "The exact provider instance changed. Re-list the MCP server; WebCodex did not retarget or replay the operation.",
+            )
+        } else if code == "provider_unavailable" {
+            Some(
+                "Check action=status, then use action=reset with confirm=true. Reset never replays the failed request; re-describe before any later call.",
+            )
+        } else {
+            None
+        };
+        return Err(GatewayError {
+            code,
+            message: error.message,
+            recovery,
             dispatch_state: Some(response.dispatch_state),
         });
     }
@@ -657,6 +799,14 @@ mod tests {
         assert!(!properties.contains_key("revisionToken"));
         assert!(!properties.contains_key("provider_instance_id"));
         assert!(!properties.contains_key("agent_instance_id"));
+        let actions = properties["action"]["enum"].as_array().unwrap();
+        for action in ["list", "status", "reset", "describe", "call"] {
+            assert!(
+                actions.iter().any(|candidate| candidate == action),
+                "missing mcp_tool action: {action}"
+            );
+        }
+        assert_eq!(properties["confirm"]["type"], "boolean");
     }
 
     #[test]
@@ -762,6 +912,47 @@ mod tests {
             ..original
         };
         assert!(runtime.observed(&replacement).is_none());
+    }
+
+    #[test]
+    fn provider_reset_observation_cleanup_is_exact_and_complete() {
+        let runtime = McpGatewayRuntime::default();
+        let observed = McpGatewaySchemaObservation {
+            input_schema: json!({"type": "object"}),
+            output_schema: None,
+            annotations: None,
+        };
+        let provider = ResolvedProvider {
+            client_id: "runner-a".to_string(),
+            runner_instance_id: "runner-a-agent".to_string(),
+            provider_id: "provider".to_string(),
+            provider_instance_id: "instance-a".to_string(),
+            name: "Provider".to_string(),
+        };
+        let target_a = ObservationKey {
+            client_id: provider.client_id.clone(),
+            provider_id: provider.provider_id.clone(),
+            provider_instance_id: provider.provider_instance_id.clone(),
+            tool_name: "tool-a".to_string(),
+        };
+        let target_b = ObservationKey {
+            tool_name: "tool-b".to_string(),
+            ..target_a.clone()
+        };
+        let other_instance = ObservationKey {
+            provider_instance_id: "instance-b".to_string(),
+            tool_name: "tool-c".to_string(),
+            ..target_a.clone()
+        };
+        runtime.remember(target_a.clone(), observed.clone());
+        runtime.remember(target_b.clone(), observed.clone());
+        runtime.remember(other_instance.clone(), observed.clone());
+
+        runtime.forget_provider(&provider);
+
+        assert!(runtime.observed(&target_a).is_none());
+        assert!(runtime.observed(&target_b).is_none());
+        assert_eq!(runtime.observed(&other_instance), Some(observed));
     }
 
     #[test]
