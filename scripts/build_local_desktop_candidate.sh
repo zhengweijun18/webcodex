@@ -4,6 +4,17 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
+if [ -n "${CARGO:-}" ]; then
+  cargo_bin="$CARGO"
+elif command -v cargo >/dev/null 2>&1; then
+  cargo_bin="$(command -v cargo)"
+elif [ -x "$HOME/.cargo/bin/cargo" ]; then
+  cargo_bin="$HOME/.cargo/bin/cargo"
+else
+  echo "cargo not found; set CARGO or install it under PATH/~/.cargo/bin" >&2
+  exit 127
+fi
+
 reuse_runtime=0
 output_root="$root/target/local-fork-desktop"
 
@@ -138,7 +149,7 @@ if [ "$reuse_runtime" -eq 1 ]; then
   done
 else
   apply_overlay_rustflags
-  cargo build --locked --profile dogfood \
+  "$cargo_bin" build --locked --profile dogfood \
     -p webcodex-cli --bin webcodex \
     -p webcodex --bin webcodex-server \
     -p webcodex-runner --bin webcodex-runner
@@ -207,7 +218,7 @@ for name in webcodex webcodex-server webcodex-runner; do
 done
 
 rustc_version="$(rustc --version)"
-cargo_version="$(cargo --version)"
+cargo_version="$("$cargo_bin" --version)"
 node_version="$(node --version)"
 npm_version="$(npm --version)"
 sdk_path="$(xcrun --show-sdk-path 2>/dev/null || true)"
