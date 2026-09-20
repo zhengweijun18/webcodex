@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "kind": "webcodex-native-semantic-parity-reference",
+  "source": "reference_contract_not_live_codex_model_benchmark",
+  "live_codex_model_execution_required": false,
+  "notes": [
+    "This fixture normalizes observable behavior that WebCodex is intended to match or intentionally diverge from.",
+    "It must never be presented as a fresh live Codex model comparison.",
+    "Live context/MCP evidence may be supplied only through the separately verified zero-model-turn app-server bridge."
+  ],
+  "capabilities": {
+    "local_file_operations": {
+      "expected_route": "webcodex_native",
+      "observable_contract": [
+        "bounded_range_read",
+        "content_digest",
+        "stable_structured_result",
+        "bounded_errors"
+      ]
+    },
+    "provider_lifecycle": {
+      "expected_route": "webcodex_native",
+      "observable_contract": [
+        "passive_status",
+        "explicit_recovery",
+        "no_hidden_effect_replay"
+      ]
+    },
+    "session_context_recovery": {
+      "expected_route": "webcodex_native",
+      "observable_contract": [
+        "session_context_revision",
+        "session_continuity",
+        "bounded_session_recovery",
+        "no_authority_from_transport_identity"
+      ]
+    },
+    "native_context_catalog": {
+      "expected_route": "zero_quota_bridge",
+      "observable_contract": [
+        "skills_catalog",
+        "hooks_catalog",
+        "mcp_catalog",
+        "permission_profile_observation"
+      ]
+    },
+    "native_mcp_readonly_call": {
+      "expected_route": "zero_quota_bridge",
+      "observable_contract": [
+        "schema_before_call",
+        "read_only_annotation_required",
+        "model_turn_started_false"
+      ]
+    },
+    "native_mcp_effectful_non_destructive_call": {
+      "expected_route": "zero_quota_bridge",
+      "observable_contract": [
+        "schema_before_call",
+        "destructive_hint_rejected",
+        "model_turn_started_false"
+      ]
+    },
+    "native_permission_profile_observation": {
+      "expected_route": "zero_quota_bridge",
+      "observable_contract": [
+        "approval_policy",
+        "sandbox_type",
+        "network_access",
+        "multi_agent_mode"
+      ]
+    },
+    "native_thread_process_resume": {
+      "expected_route": "unavailable",
+      "observable_contract": ["fail_closed_without_codex_model_fallback"]
+    },
+    "native_tui_cli_shell": {
+      "expected_route": "unavailable",
+      "observable_contract": ["not_a_runtime_parity_requirement"]
+    },
+    "native_host_lifecycle_intercept": {
+      "expected_route": "unavailable",
+      "observable_contract": ["independent_runtime_boundary"]
+    }
+  }
+}

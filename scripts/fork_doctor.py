@@ -377,8 +377,18 @@ def check_zero_quota_state(root: Path, workspace: Path | None):
         failures.append("readonly quota mode drift")
     if readonly.get("model_turn_started") is not False:
         failures.append("readonly model_turn_started drift")
-    if value.get("native_runtime", {}).get("acp_coding_agent_enabled") is not False:
+    native_runtime = value.get("native_runtime") or {}
+    if native_runtime.get("codex_model_turns_allowed") is not False:
+        failures.append("Codex model turns unexpectedly allowed")
+    if native_runtime.get("acp_coding_agent_enabled") is not False:
         failures.append("ACP coding agent unexpectedly enabled")
+    quota_proof = value.get("quota_proof") or {}
+    if quota_proof.get("codex_model_turn_started") is not False:
+        failures.append("quota proof reports a Codex model turn")
+    if quota_proof.get("rate_limits_before_after_equal") is not True:
+        failures.append("quota proof rate limits changed")
+    if quota_proof.get("usage_before_after_equal") is not True:
+        failures.append("quota proof usage changed")
     if failures:
         raise RuntimeError("; ".join(failures))
     return passed(
@@ -388,6 +398,38 @@ def check_zero_quota_state(root: Path, workspace: Path | None):
             "bridge_version": provider.get("bridge_version"),
             "tool_count": provider.get("tool_count"),
             "fingerprint": value.get("context", {}).get("fingerprint"),
+        },
+    )
+
+
+def check_native_semantic_parity(root: Path, workspace: Path | None):
+    script = root / "scripts/check_native_semantic_parity.py"
+    if not script.is_file():
+        raise RuntimeError(f"native semantic parity checker is missing: {script}")
+    command = [sys.executable, str(script), "--root", str(root), "--json"]
+    if workspace is not None:
+        command.extend(["--context-workspace", str(workspace)])
+    result = run(command, cwd=root, timeout=20, check=False)
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("native semantic parity checker returned invalid JSON") from exc
+    if result.returncode != 0 or value.get("status") != "passed":
+        failed = value.get("failed_checks") or [value.get("error") or "unknown failure"]
+        raise RuntimeError("native semantic parity failed: " + "; ".join(failed))
+    coverage = value.get("coverage") or []
+    return passed(
+        "Codex-compatible parity policy is fail-closed with zero native model quota",
+        {
+            "goal": value.get("goal"),
+            "capability_count": len(coverage),
+            "external_evidence": (value.get("external_evidence") or {}).get("status"),
+            "native_codex_model_quota_budget": (value.get("invariant") or {}).get(
+                "native_codex_model_quota_budget"
+            ),
+            "observed_native_codex_model_quota_consumed": (
+                value.get("invariant") or {}
+            ).get("observed_native_codex_model_quota_consumed"),
         },
     )
 
@@ -482,6 +524,11 @@ def main() -> int:
         checks,
         "zero-quota-state",
         lambda: check_zero_quota_state(root, args.context_workspace),
+    )
+    record(
+        checks,
+        "native-semantic-parity",
+        lambda: check_native_semantic_parity(root, args.context_workspace),
     )
     record(
         checks,

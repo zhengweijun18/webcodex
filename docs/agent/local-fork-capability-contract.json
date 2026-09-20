@@ -3,6 +3,9 @@
   "kind": "webcodex-local-fork-capability-contract",
   "principles": {
     "zero_codex_model_turn": "required",
+    "codex_is_reference_not_backend": "required",
+    "codex_model_fallback": "forbidden",
+    "unsupported_parity_capability": "fail_closed",
     "no_hidden_effect_replay": "required",
     "explicit_irreversible_boundary": "required",
     "upstream_first": "required",
@@ -54,6 +57,21 @@
       "required": true,
       "external": true,
       "description": "When a context workspace is supplied, its machine-readable state must prove zero Codex model turns."
+    },
+    {
+      "id": "zero_codex_quota_global_invariant",
+      "required": true,
+      "description": "Native Codex is a behavior reference only: policy permits no Codex model fallback and a supplied bridge must prove zero model-turn usage."
+    },
+    {
+      "id": "native_semantic_parity_policy",
+      "required": true,
+      "description": "Every tracked parity capability has a machine-readable WebCodex-native, zero-quota bridge, or fail-closed unavailable route."
+    },
+    {
+      "id": "native_semantic_parity_harness",
+      "required": true,
+      "description": "A deterministic harness compares WebCodex evidence with a declared Codex behavior reference contract without running a Codex model turn."
     }
   ]
 }

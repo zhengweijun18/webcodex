@@ -106,6 +106,43 @@ The main doctor runs this check automatically. This deliberately verifies
 capabilities rather than exact implementation shape, allowing an upstream
 implementation to replace a local patch when it satisfies the same contract.
 
+## Zero-quota native semantic parity
+
+The fork treats native Codex as a behavior reference, never as a model backend.
+The hard invariant is that native Codex model quota budget is zero and Codex
+model fallback is forbidden.
+
+The policy file at docs/agent/native-semantic-parity-policy.json assigns every
+tracked parity surface one of three routes only:
+
+- webcodex_native: independent WebCodex implementation;
+- zero_quota_bridge: direct metadata/MCP app-server RPC backed by separate
+  zero-model-turn evidence;
+- unavailable: fail closed when neither safe route exists.
+
+There is deliberately no codex_model route. Native thread/process resume,
+host-private lifecycle interception, and TUI/CLI presentation parity are
+intentional gaps rather than reasons to start a Codex model turn.
+
+Run scripts/check_native_semantic_parity.py for a repository-only policy and
+reference check. Add --context-workspace /path/to/context-workspace to validate
+the separately maintained zero-quota state and audit the bridge's current RPC
+surface.
+
+The bridge audit is allowlist-based. A newly introduced Codex app-server RPC is
+rejected until it is explicitly classified; thread/start is accepted only in
+ephemeral form. Supplied state must prove Codex model turns are disabled, ACP
+coding-agent execution is disabled, read-only/effectful MCP paths report
+model_turn_started=false, and recorded usage/rate limits are unchanged.
+
+docs/agent/native-semantic-parity-reference.json is a normalized behavior
+fixture, not a fresh live Codex model benchmark. It makes differential checks
+deterministic without spending native Codex quota.
+
+To resolve one policy route, run the parity checker with --route followed by a
+capability id, for example native_mcp_readonly_call. Without valid zero-quota
+bridge evidence, such a route fails closed to unavailable.
+
 ## Rehearse an upstream update
 
 Fetch upstream separately, then rehearse the forward-port in a disposable

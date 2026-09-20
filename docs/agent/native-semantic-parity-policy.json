@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "kind": "webcodex-native-semantic-parity-policy",
+  "goal": "maximum_codex_observable_semantic_parity_with_zero_native_codex_model_quota",
+  "invariants": {
+    "codex_role": "reference_only",
+    "native_codex_model_quota": "forbidden",
+    "codex_model_fallback": "forbidden",
+    "unsupported_capability": "fail_closed",
+    "allowed_routes": [
+      "webcodex_native",
+      "zero_quota_bridge",
+      "unavailable"
+    ]
+  },
+  "zero_quota_bridge": {
+    "state_schema": "webcodex-codex-target-mode.v3",
+    "allowed_app_server_methods": [
+      "config/read",
+      "hooks/list",
+      "initialize",
+      "mcpServer/tool/call",
+      "mcpServerStatus/list",
+      "skills/list",
+      "thread/start"
+    ],
+    "thread_start_requires_ephemeral": true,
+    "generic_destructive_passthrough": false,
+    "required_quota_mode": "zero_codex_model_turn"
+  },
+  "capabilities": [
+    {
+      "id": "local_file_operations",
+      "required": true,
+      "parity_target": "observable_semantic_equivalence",
+      "route_order": ["webcodex_native", "unavailable"],
+      "probe": "local_file_operations"
+    },
+    {
+      "id": "provider_lifecycle",
+      "required": true,
+      "parity_target": "observable_semantic_equivalence",
+      "route_order": ["webcodex_native", "unavailable"],
+      "probe": "provider_lifecycle"
+    },
+    {
+      "id": "session_context_recovery",
+      "required": true,
+      "parity_target": "independent_runtime_semantic_equivalence",
+      "route_order": ["webcodex_native", "unavailable"],
+      "probe": "session_context_recovery"
+    },
+    {
+      "id": "native_context_catalog",
+      "required": true,
+      "parity_target": "zero_quota_reference_projection",
+      "route_order": ["zero_quota_bridge", "unavailable"],
+      "probe": "zero_quota_bridge"
+    },
+    {
+      "id": "native_mcp_readonly_call",
+      "required": true,
+      "parity_target": "zero_quota_tool_semantics",
+      "route_order": ["zero_quota_bridge", "unavailable"],
+      "probe": "zero_quota_bridge"
+    },
+    {
+      "id": "native_mcp_effectful_non_destructive_call",
+      "required": true,
+      "parity_target": "zero_quota_tool_semantics",
+      "route_order": ["zero_quota_bridge", "unavailable"],
+      "probe": "zero_quota_bridge"
+    },
+    {
+      "id": "native_permission_profile_observation",
+      "required": true,
+      "parity_target": "reference_only_observation",
+      "route_order": ["zero_quota_bridge", "unavailable"],
+      "probe": "zero_quota_bridge"
+    },
+    {
+      "id": "native_thread_process_resume",
+      "required": false,
+      "parity_target": "intentional_gap",
+      "route_order": ["unavailable"],
+      "probe": "intentionally_unavailable",
+      "reason": "Native Codex thread/process execution would cross the zero-model-quota boundary."
+    },
+    {
+      "id": "native_tui_cli_shell",
+      "required": false,
+      "parity_target": "intentional_gap",
+      "route_order": ["unavailable"],
+      "probe": "intentionally_unavailable",
+      "reason": "Host UI parity is not required for observable runtime semantics and must not justify a Codex model fallback."
+    },
+    {
+      "id": "native_host_lifecycle_intercept",
+      "required": false,
+      "parity_target": "intentional_gap",
+      "route_order": ["unavailable"],
+      "probe": "intentionally_unavailable",
+      "reason": "Host-private lifecycle interception is outside the independent WebCodex runtime boundary."
+    }
+  ]
+}

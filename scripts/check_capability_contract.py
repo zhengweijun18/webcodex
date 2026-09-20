@@ -104,6 +104,43 @@ def probe(root: Path, capability: str) -> tuple[bool, dict]:
         return ok, data
     if capability == "external_zero_quota_evidence":
         return True, {"external": True, "checked_by": "fork_doctor.py --context-workspace"}
+    if capability == "zero_codex_quota_global_invariant":
+        return contains_any(
+            root,
+            (
+                (
+                    "docs/agent/native-semantic-parity-policy.json",
+                    (
+                        '"native_codex_model_quota": "forbidden"',
+                        '"codex_model_fallback": "forbidden"',
+                        '"unsupported_capability": "fail_closed"',
+                    ),
+                ),
+            ),
+        )
+    if capability == "native_semantic_parity_policy":
+        return required_files(
+            root,
+            (
+                "docs/agent/native-semantic-parity-policy.json",
+                "docs/agent/native-semantic-parity-reference.json",
+            ),
+        )
+    if capability == "native_semantic_parity_harness":
+        return contains_any(
+            root,
+            (
+                (
+                    "scripts/check_native_semantic_parity.py",
+                    (
+                        "codex_model_fallback_allowed",
+                        "audit_bridge",
+                        "validate_external_state",
+                        "reference_contract_not_live_codex_model_benchmark",
+                    ),
+                ),
+            ),
+        )
     return False, {"error": f"unknown capability id: {capability}"}
 
 
