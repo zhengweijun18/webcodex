@@ -22,6 +22,17 @@ POLICY = json.loads((ROOT / self_maintenance.POLICY).read_text())
 
 
 class SelfMaintenanceTests(unittest.TestCase):
+    def test_subprocess_environment_includes_standard_rust_bin(self) -> None:
+        with mock.patch.object(
+            self_maintenance.subprocess, "run"
+        ) as subprocess_run:
+            subprocess_run.return_value = mock.Mock(
+                stdout="", stderr="", returncode=0
+            )
+            self_maintenance.run(["cargo", "--version"], cwd=ROOT)
+        env = subprocess_run.call_args.kwargs["env"]
+        self.assertIn(str(Path.home() / ".cargo/bin"), env["PATH"].split(":"))
+
     def test_policy_keeps_codex_reference_only_and_zero_quota(self) -> None:
         policy = self_maintenance.load_policy(ROOT)
         invariants = policy["invariants"]

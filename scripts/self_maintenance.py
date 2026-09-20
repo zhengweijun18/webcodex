@@ -29,6 +29,14 @@ def run(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     merged = os.environ.copy()
+    path_entries = [
+        str(Path.home() / ".cargo/bin"),
+        str(Path.home() / ".local/bin"),
+        "/usr/local/bin",
+        "/opt/homebrew/bin",
+        merged.get("PATH", ""),
+    ]
+    merged["PATH"] = os.pathsep.join(entry for entry in path_entries if entry)
     if env:
         merged.update(env)
     return subprocess.run(
