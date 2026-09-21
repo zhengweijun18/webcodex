@@ -40,6 +40,32 @@ npx --yes @yyjeqhc/webcodex share
 - **工作不局限于一次请求。** 长时间执行、测试结果和相关证据可以继续观察。
 - **既能临时使用，也能长期部署。** 可以一条命令快速分享，也可以连接到自托管服务长期使用。
 
+## 本 Fork 的增强能力：Zero-Quota 原生 Codex 逼近
+
+这个 Fork 另外维护了一条增强分支 [`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)，目标是让 **ChatGPT + WebCodex 更像一个可靠的本地开发 Agent，同时保持 Native Codex 模型调用为 0**。
+
+当前已验证基线：`3082590b87de6f023d775c98f8a082df6b4168c4`。
+
+这条增强分支主要增加了这些能力：
+
+- **Zero-Quota Native Context**：可以读取可观察的 Codex Runtime 上下文，例如 Skill、项目规则、Hook、Knowledge，但不会启动 Native Codex model turn，也不会在 WebCodex 做不了时偷偷 fallback 到 Codex Agent。
+- **自动项目上下文**：AI 开工前可自动拿到根目录/子目录 `AGENTS.md`、可用 Skill、Knowledge、Runtime Context 和 Workflow 当前现场，不需要每次重新解释项目怎么玩。
+- **Skill / Knowledge 不依赖本机绝对路径**：模型通过 Skill 名称、opaque id、semantic key 工作，避免把开发机目录结构变成接口。
+- **长任务和 Workflow 可恢复**：build/test 等后台 Job 不跟一次聊天一起消失；断线、重连、Runtime 重启后可以继续观察任务和恢复当前工作上下文。
+- **真实操作更安全**：push、安装、文件修改等操作如果结果不确定，不会直接重复执行；retry 不会偷偷延长原 deadline，也不会静默换到另一个 Runner。
+- **验证结果更可信**：以真实终态和 exit code 判断成功/失败，避免 `cargo fmt --check` 这类“成功但没有输出”的命令被记成假失败。
+- **原生 Vue LSP**：支持 Vue SFC 的定义跳转、引用、诊断、符号等能力，并使用固定的 Vue Language Server / TypeScript 工具链。
+- **Desktop one-shot 安全升级**：候选版本验证、当前版本备份、精确退出 App 自身进程、只启动一次、健康检查、Last Known Good、失败自动回滚。
+- **Self-Maintaining Fork**：不是看“补丁还能不能套”，而是通过行为验证判断 upstream 是否已经真正实现同等能力；只有验证通过，本地 patch 才允许退休。
+- **Doctor + 可追溯构建**：可以机器化检查源码、已安装 Desktop、正在运行的 Server/Runner、rollback、工具链、Zero-Quota 证据和构建 provenance 是否一致。
+
+这里的“逼近原生 Codex”只指 **可观察、可验证的 Runtime 行为**，不代表复制 OpenAI 私有 Codex Host、模型 reasoning/planning、模型自己的 tool-selection intelligence 或 Native Codex TUI。
+
+当前验证版的 macOS Intel 完整交接包也已同步到仓库：
+
+- [WebCodex-Zero-Quota-3082590b-macOS-Intel.zip](deliverables/WebCodex-Zero-Quota-3082590b-macOS-Intel.zip)
+- [交接包说明与 SHA256](deliverables/README.md)
+
 ## 工作方式
 
 ```text

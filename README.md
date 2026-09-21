@@ -40,6 +40,32 @@ npx --yes @yyjeqhc/webcodex share
 - **Work survives beyond a single request.** Long-running execution and evidence remain observable through WebCodex.
 - **Start temporary or run it long-term.** Use one-command sharing for a quick session, or connect machines to a self-hosted Server for a durable setup.
 
+## Fork enhancements: Zero-Quota Native-like Runtime
+
+This fork also maintains an enhanced branch, [`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main), focused on making ChatGPT + WebCodex behave more like a reliable local coding agent while keeping **Native Codex model usage at zero**.
+
+Current validated baseline: `3082590b87de6f023d775c98f8a082df6b4168c4`.
+
+Key additions on that branch include:
+
+- **Zero-Quota Native Context** — reuse observable Codex Runtime context such as Skills, scoped project instructions, Hooks, and Knowledge without starting a Native Codex model turn or silently falling back to a Codex agent.
+- **Automatic project context** — `AGENTS.md`, nested scoped instructions, available Skills, Knowledge, runtime context, and workflow state can be projected automatically before the agent starts work.
+- **Pathless Skill / Knowledge contracts** — the model works with Skill names, opaque ids, and semantic Knowledge keys instead of depending on developer-machine absolute paths.
+- **Durable Jobs and Workflow recovery** — long builds/tests survive beyond one chat turn, and Workflow Sessions retain validation/context continuity across reconnects and restarts.
+- **Safer real-world effects** — uncertain mutations fail closed instead of being silently replayed; retries keep the original deadline and do not silently retarget another Runner.
+- **Structured validation** — terminal process state and exit codes are authoritative, preventing successful silent commands such as `cargo fmt --check` from being recorded as unresolved failures.
+- **Native Vue LSP** — Vue SFC navigation, references, diagnostics, symbols, and a pinned Vue/TypeScript toolchain work through WebCodex's native LSP surface.
+- **One-shot Desktop adoption** — candidate verification, verified backup, exact App-bundle shutdown, single relaunch, health check, Last Known Good promotion, and automatic rollback if the new Desktop does not become healthy.
+- **Self-maintaining fork** — behavioral patch-retirement checks determine whether upstream has truly replaced a local capability before that patch can be removed.
+- **Doctor + reproducible provenance** — source, installed Desktop, running Server/Runner, rollback state, toolchain, Zero-Quota evidence, and build provenance can be checked mechanically.
+
+This does **not** claim to copy OpenAI's private Codex Host, model reasoning/planning, model-side tool-selection intelligence, or the Native Codex TUI. The target is observable, testable runtime behavior only.
+
+A ready-to-share macOS Intel handoff package for the validated baseline is available here:
+
+- [WebCodex-Zero-Quota-3082590b-macOS-Intel.zip](deliverables/WebCodex-Zero-Quota-3082590b-macOS-Intel.zip)
+- [Package checksum and handoff notes](deliverables/README.md)
+
 ## How it works
 
 ```text
