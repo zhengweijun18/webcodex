@@ -25,6 +25,8 @@ fi
 
 reuse_runtime=0
 output_root="$root/target/local-fork-desktop"
+bundled_node_version="v24.21.0"
+context_bridge_version="$(node -p "require('./tooling/tools/codex-context-bridge/package.json').version")"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -67,8 +69,16 @@ built_at="$(git show -s --format=%ct HEAD)"
 machine="$(uname -m)"
 
 case "$machine" in
-  x86_64) platform="darwin-x64" ;;
-  arm64) platform="darwin-arm64" ;;
+  x86_64)
+    platform="darwin-x64"
+    bundled_node_arch="x64"
+    bundled_node_sha256="1462cb3b3046b815cf8ea436d3da450ec1a9f11dac7e5a46b0ada5305d7e8097"
+    ;;
+  arm64)
+    platform="darwin-arm64"
+    bundled_node_arch="arm64"
+    bundled_node_sha256="bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057"
+    ;;
   *)
     echo "unsupported macOS architecture: $machine" >&2
     exit 1
@@ -76,6 +86,55 @@ case "$machine" in
 esac
 
 mkdir -p "$output_root"
+tool_cache="$output_root/tool-cache"
+node_dist="node-$bundled_node_version-darwin-$bundled_node_arch"
+node_archive="$tool_cache/$node_dist.tar.gz"
+bundled_node="$tool_cache/$node_dist/bin/node"
+mkdir -p "$tool_cache"
+
+verify_node_archive() {
+  [ -f "$node_archive" ] || return 1
+  actual="$(shasum -a 256 "$node_archive" | awk '{print $1}')"
+  [ "$actual" = "$bundled_node_sha256" ]
+}
+
+if ! verify_node_archive; then
+  rm -f "$node_archive"
+  tmp_archive="$node_archive.partial"
+  rm -f "$tmp_archive"
+  curl -fL --retry 2 --connect-timeout 15 --max-time 300 \
+    "https://nodejs.org/dist/$bundled_node_version/$node_dist.tar.gz" \
+    -o "$tmp_archive"
+  actual="$(shasum -a 256 "$tmp_archive" | awk '{print $1}')"
+  [ "$actual" = "$bundled_node_sha256" ] || {
+    echo "bundled Node checksum mismatch: expected=$bundled_node_sha256 actual=$actual" >&2
+    rm -f "$tmp_archive"
+    exit 1
+  }
+  mv "$tmp_archive" "$node_archive"
+fi
+
+if [ ! -x "$bundled_node" ]; then
+  rm -rf "$tool_cache/$node_dist"
+  tar -xzf "$node_archive" -C "$tool_cache"
+fi
+[ "$("$bundled_node" --version)" = "$bundled_node_version" ] || {
+  echo "bundled Node version mismatch" >&2
+  exit 1
+}
+[ "$(/usr/bin/lipo -archs "$bundled_node")" = "$machine" ] || {
+  echo "bundled Node architecture mismatch" >&2
+  exit 1
+}
+if otool -L "$bundled_node" \
+  | tail -n +2 \
+  | grep -v -E '^[[:space:]]+(/usr/lib/|/System/Library/)' \
+  | grep -q .; then
+  echo "bundled Node has non-system dynamic library dependencies" >&2
+  otool -L "$bundled_node" >&2
+  exit 1
+fi
+
 overlay="$output_root/macos-sdk-overlay/Frameworks"
 rm -rf "$output_root/macos-sdk-overlay"
 extra_rustflags=""
@@ -202,6 +261,10 @@ python3 scripts/prepare_desktop_bundle_macos.py \
   --built-at "$built_at" \
   --platform "$platform" \
   --signing-mode adhoc \
+  --node-bin "$bundled_node" \
+  --node-version "$bundled_node_version" \
+  --context-bridge-dir tooling/tools/codex-context-bridge \
+  --context-bridge-version "$context_bridge_version" \
   --output-dir "$stage"
 
 tauri_target="$output_root/tauri-target"
@@ -235,6 +298,30 @@ for name in webcodex webcodex-server webcodex-runner; do
   }
 done
 
+tools_dir="$app/Contents/Resources/webcodex-tools"
+bundled_node_in_app="$tools_dir/node/node"
+bridge_dir_in_app="$tools_dir/codex-context-bridge"
+[ "$("$bundled_node_in_app" --version)" = "$bundled_node_version" ] || {
+  echo "bundled Node missing or has the wrong version" >&2
+  exit 1
+}
+bridge_check="$("$bundled_node_in_app" "$bridge_dir_in_app/self-check.mjs")"
+python3 - "$bridge_check" "$context_bridge_version" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+expected_version = sys.argv[2]
+if payload.get("status") != "pass":
+    raise SystemExit(f"bundled Context Bridge self-check failed: {payload}")
+if payload.get("bridge_version") != expected_version:
+    raise SystemExit(
+        f"bundled Context Bridge version mismatch: {payload.get('bridge_version')} != {expected_version}"
+    )
+if payload.get("native_model_turns") != 0:
+    raise SystemExit(f"bundled Context Bridge started a native model turn: {payload}")
+PY
+
 rustc_version="$(rustc --version)"
 cargo_version="$("$cargo_bin" --version)"
 node_version="$(node --version)"
@@ -252,7 +339,7 @@ if [ -f "$vue_tool_root/node_modules/typescript/package.json" ]; then
 fi
 
 provenance="$output_root/build-provenance.json"
-python3 - "$provenance" "$app" "$source_sha" "$version" "$built_at" "$platform" "$stage/desktop-bundle.json" "$extra_rustflags" "$rustc_version" "$cargo_version" "$node_version" "$npm_version" "$sdk_path" "$sdk_version" "$vue_version" "$typescript_version" <<'PY'
+python3 - "$provenance" "$app" "$source_sha" "$version" "$built_at" "$platform" "$stage/desktop-bundle.json" "$extra_rustflags" "$rustc_version" "$cargo_version" "$node_version" "$npm_version" "$sdk_path" "$sdk_version" "$vue_version" "$typescript_version" "$bundled_node_version" "$context_bridge_version" <<'PY'
 import hashlib
 import json
 import sys
@@ -261,7 +348,8 @@ from pathlib import Path
 (
     out, app, source, version, built_at, platform, stage_metadata, rustflags,
     rustc_version, cargo_version, node_version, npm_version, sdk_path,
-    sdk_version, vue_version, typescript_version,
+    sdk_version, vue_version, typescript_version, bundled_node_version,
+    context_bridge_version,
 ) = sys.argv[1:]
 
 def sha256(path: Path) -> str:
@@ -272,6 +360,7 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 runtime = Path(app) / "Contents/Resources/webcodex-runtime"
+tools = Path(app) / "Contents/Resources/webcodex-tools"
 payload = {
     "schema_version": 1,
     "source_sha": source,
@@ -291,10 +380,24 @@ payload = {
         "sdk_version": sdk_version,
         "vue_language_server": vue_version or None,
         "typescript": typescript_version or None,
+        "bundled_node": bundled_node_version,
+        "codex_context_bridge": context_bridge_version,
     },
     "runtime_sha256": {
         name: sha256(runtime / name)
         for name in ("webcodex", "webcodex-server", "webcodex-runner")
+    },
+    "bundled_tools": {
+        "node": {
+            "version": bundled_node_version,
+            "sha256": sha256(tools / "node/node"),
+        },
+        "codex_context_bridge": {
+            "version": context_bridge_version,
+            "server_sha256": sha256(tools / "codex-context-bridge/server.mjs"),
+            "bridge_lib_sha256": sha256(tools / "codex-context-bridge/bridge-lib.mjs"),
+            "self_check_sha256": sha256(tools / "codex-context-bridge/self-check.mjs"),
+        },
     },
 }
 Path(out).write_text(json.dumps(payload, indent=2) + "\n")

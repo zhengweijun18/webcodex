@@ -53,7 +53,7 @@
     {
       "id": "zero_quota_native_context_orchestration",
       "required": true,
-      "description": "Canonical work_on_project startup can automatically project bounded native Skill/Hook/knowledge/Ponytail context through a schema-bound Context Bridge on the same Runner, without starting a Codex model turn or claiming host-private lifecycle interception."
+      "description": "Canonical work_on_project startup can automatically project bounded native Skill/Hook/knowledge/Ponytail context through a schema-bound Context Bridge on the same Runner, without starting a Codex model turn or claiming host-private lifecycle interception. Enhanced Desktop bundles its own pinned Node runtime plus Context Bridge and automatically injects the internal codex_context provider for Desktop-owned Runner processes when the operator has not explicitly configured that provider."
     },
     {
       "id": "pathless_native_context_loading",
@@ -84,6 +84,14 @@
         "src/tool_runtime/files/inspection.rs",
         "src/tool_runtime/mod.rs",
         "src/tool_runtime/startup_brief.rs",
+        "apps/desktop/src-tauri/src/models.rs",
+        "apps/desktop/src-tauri/src/state.rs",
+        "apps/desktop/src-tauri/src/webcodex/adapter.rs",
+        "apps/desktop/src/models/topology.ts",
+        "apps/desktop/src/features/workspace/WorkspaceStatus.tsx",
+        "crates/webcodex-runner/src/webcodex_runner/config.rs",
+        "scripts/build_local_desktop_candidate.sh",
+        "scripts/prepare_desktop_bundle_macos.py",
         "crates/webcodex-tool-contracts/src/registry/output_schemas/skills.rs",
         "crates/webcodex-tool-contracts/src/registry/tool_specs/skills.rs",
         "crates/webcodex-tool-contracts/src/tests/output_schemas.rs",

@@ -242,6 +242,14 @@ pub struct BinaryInfo {
     pub source: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct EnhancedRuntimeSnapshot {
+    pub bundled_node_ready: bool,
+    pub bundled_context_bridge_ready: bool,
+    pub native_codex_reference_available: bool,
+    pub native_context_ready: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QuickShareState {
     pub provider: String,
@@ -407,6 +415,8 @@ pub struct DesktopStateSnapshot {
     pub project: Option<ProjectSelection>,
     pub binaries: Option<BinaryInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enhanced_runtime: Option<EnhancedRuntimeSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub powershell_runtime: Option<PowerShellRuntimeSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chatgpt_activity: Option<ChatGptActivitySnapshot>,
@@ -430,6 +440,7 @@ impl Default for DesktopStateSnapshot {
             readiness: ReadinessSnapshot::default(),
             project: None,
             binaries: None,
+            enhanced_runtime: None,
             powershell_runtime: None,
             chatgpt_activity: None,
             quick_share: None,

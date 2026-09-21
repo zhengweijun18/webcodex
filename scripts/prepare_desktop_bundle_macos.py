@@ -16,6 +16,7 @@ from pathlib import Path
 
 
 BINARIES = ("webcodex", "webcodex-server", "webcodex-runner")
+BRIDGE_FILES = ("bridge-lib.mjs", "README.md", "package.json", "server.mjs", "self-check.mjs")
 PLATFORM_ARCH = {
     "darwin-x64": ("x86_64", "x86_64"),
     "darwin-arm64": ("arm64", "arm64"),
@@ -83,6 +84,7 @@ def stage(args: argparse.Namespace) -> dict:
         raise StageError(f"Desktop bundle output already exists: {output_dir}")
 
     runtime_dir = output_dir / "resources" / "webcodex-runtime"
+    tools_dir = output_dir / "resources" / "webcodex-tools"
     runtime_dir.mkdir(parents=True)
     short_source = args.source_sha[:12].lower()
     resources: dict[str, str] = {}
@@ -134,6 +136,68 @@ def stage(args: argparse.Namespace) -> dict:
                 "staged_unsigned_sha256": destination_digest,
             }
 
+        node_source = args.node_bin.resolve(strict=True)
+        node_stat = node_source.lstat()
+        if not stat.S_ISREG(node_stat.st_mode) or node_source.is_symlink():
+            raise StageError("bundled Node runtime must be a regular non-symlink file")
+        actual_node_version = run_line([str(node_source), "--version"])
+        if actual_node_version != args.node_version:
+            raise StageError(
+                f"unexpected bundled Node version: {actual_node_version!r} "
+                f"(expected {args.node_version!r})"
+            )
+        actual_node_arch = run_line(["/usr/bin/lipo", "-archs", str(node_source)])
+        if actual_node_arch != expected_binary_arch:
+            raise StageError(
+                f"unexpected bundled Node architecture: expected={expected_binary_arch} "
+                f"actual={actual_node_arch}"
+            )
+        node_destination = tools_dir / "node" / "node"
+        node_destination.parent.mkdir(parents=True)
+        shutil.copy2(node_source, node_destination, follow_symlinks=False)
+        node_destination.chmod(
+            node_destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+        node_digest = sha256_file(node_destination)
+        if node_digest != sha256_file(node_source):
+            raise StageError("staged bundled Node byte verification failed")
+        resources[str(node_destination.resolve())] = "webcodex-tools/node/node"
+
+        bridge_source_dir = args.context_bridge_dir.resolve(strict=True)
+        if not bridge_source_dir.is_dir() or bridge_source_dir.is_symlink():
+            raise StageError("Context Bridge source must be a regular directory")
+        bridge_destination_dir = tools_dir / "codex-context-bridge"
+        bridge_files: dict[str, dict[str, object]] = {}
+        for name in BRIDGE_FILES:
+            source = bridge_source_dir / name
+            source_stat = source.lstat()
+            if not stat.S_ISREG(source_stat.st_mode) or source.is_symlink():
+                raise StageError(f"Context Bridge file must be regular and non-symlink: {name}")
+            destination = bridge_destination_dir / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination, follow_symlinks=False)
+            source_digest = sha256_file(source)
+            destination_digest = sha256_file(destination)
+            if source_digest != destination_digest:
+                raise StageError(f"staged Context Bridge byte verification failed: {name}")
+            resources[str(destination.resolve())] = (
+                f"webcodex-tools/codex-context-bridge/{name}"
+            )
+            bridge_files[name] = {
+                "size": destination.stat().st_size,
+                "sha256": destination_digest,
+            }
+
+        package = json.loads(
+            (bridge_destination_dir / "package.json").read_text(encoding="utf-8")
+        )
+        bridge_version = package.get("version")
+        if bridge_version != args.context_bridge_version:
+            raise StageError(
+                f"unexpected Context Bridge version: {bridge_version!r} "
+                f"(expected {args.context_bridge_version!r})"
+            )
+
         macos: dict[str, object] = {}
         if args.signing_mode == "adhoc":
             macos["signingIdentity"] = "-"
@@ -150,15 +214,28 @@ def stage(args: argparse.Namespace) -> dict:
         overlay_path.write_text(json.dumps(overlay, indent=2) + "\n", encoding="utf-8")
 
         metadata = {
-            "schema_version": 2,
+            "schema_version": 3,
             "platform": args.platform,
             "version": args.version,
             "source_sha": args.source_sha.lower(),
             "built_at": args.built_at,
             "signing_mode": args.signing_mode,
             "resource_dir": "resources/webcodex-runtime",
+            "tool_resource_dir": "resources/webcodex-tools",
             "provenance": "same_unsigned_runtime_input_before_platform_signing",
             "files": files,
+            "bundled_tools": {
+                "node": {
+                    "version": args.node_version,
+                    "sha256": node_digest,
+                    "resource": "webcodex-tools/node/node",
+                },
+                "codex_context_bridge": {
+                    "version": bridge_version,
+                    "resource_dir": "webcodex-tools/codex-context-bridge",
+                    "files": bridge_files,
+                },
+            },
         }
         metadata_path = output_dir / "desktop-bundle.json"
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
@@ -180,6 +257,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--built-at", type=int, required=True)
     result.add_argument("--platform", choices=tuple(PLATFORM_ARCH), required=True)
     result.add_argument("--signing-mode", choices=("adhoc", "developer-id"), required=True)
+    result.add_argument("--node-bin", type=Path, required=True)
+    result.add_argument("--node-version", required=True)
+    result.add_argument("--context-bridge-dir", type=Path, required=True)
+    result.add_argument("--context-bridge-version", required=True)
     result.add_argument("--output-dir", type=Path, required=True)
     return result
 

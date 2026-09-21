@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -93,6 +94,56 @@ class ForkDoctorEvolutionTests(unittest.TestCase):
         self.assertEqual(status, "passed")
         self.assertIn("1 ready, 1 retained", detail)
         self.assertFalse(data["mutations_performed_on_real_branch"])
+
+    def test_installed_enhanced_runtime_accepts_bundled_node_and_zero_quota_bridge(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td) / "WebCodex Desktop.app"
+            tools = app / "Contents/Resources/webcodex-tools"
+            node = tools / "node/node"
+            bridge = tools / "codex-context-bridge"
+            node.parent.mkdir(parents=True)
+            bridge.mkdir(parents=True)
+            node.write_text("node")
+            for name in ("bridge-lib.mjs", "server.mjs", "self-check.mjs"):
+                (bridge / name).write_text("fixture")
+            (bridge / "package.json").write_text(json.dumps({"version": "0.5.0"}))
+            completed = [
+                subprocess.CompletedProcess(
+                    args=[str(node), "--version"],
+                    returncode=0,
+                    stdout="v24.21.0\n",
+                    stderr="",
+                ),
+                subprocess.CompletedProcess(
+                    args=[str(node), str(bridge / "self-check.mjs")],
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "status": "pass",
+                            "bridge_version": "0.5.0",
+                            "native_model_turns": 0,
+                        }
+                    ),
+                    stderr="",
+                ),
+            ]
+            with mock.patch.object(doctor.platform, "system", return_value="Darwin"), \
+                 mock.patch.object(doctor, "run", side_effect=completed):
+                status, detail, data = doctor.check_installed_enhanced_runtime(ROOT, app)
+        self.assertEqual(status, "passed")
+        self.assertIn("bundled Node + Context Bridge", detail)
+        self.assertEqual(data["bundled_node_version"], "v24.21.0")
+        self.assertEqual(data["native_model_turns"], 0)
+
+    def test_installed_enhanced_runtime_warns_when_bundle_resources_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(doctor.platform, "system", return_value="Darwin"):
+            app = Path(td) / "WebCodex Desktop.app"
+            app.mkdir()
+            status, detail, data = doctor.check_installed_enhanced_runtime(ROOT, app)
+        self.assertEqual(status, "warning")
+        self.assertIn("missing single-install", detail)
+        self.assertTrue(data["missing_resources"])
 
 
 if __name__ == "__main__":

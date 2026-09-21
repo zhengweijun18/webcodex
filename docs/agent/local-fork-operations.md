@@ -80,6 +80,47 @@ logical provider id is `codex_context`; override only the logical id with
 `WEBCODEX_CODEX_CONTEXT_PROVIDER` when a deployment uses a different name.
 Never configure a user-specific absolute bridge path in the Server contract.
 
+### Enhanced Desktop single-install behavior
+
+The maintained enhanced Desktop packages the default Context Bridge as a
+Desktop resource instead of requiring a user to copy it into Application
+Support or edit `runner.toml` manually. Formal macOS candidates contain:
+
+- `Contents/Resources/webcodex-tools/node/node` — a pinned official Node
+  runtime whose archive SHA256 is verified during the build;
+- `Contents/Resources/webcodex-tools/codex-context-bridge/` — the vendored
+  Context Bridge source from this exact WebCodex commit.
+
+The Desktop passes those two resource locations only to the Desktop-owned
+Runner process. Runner config loading treats them as an optional built-in
+provider source:
+
+- if the operator already configured provider id `codex_context`, the
+  operator configuration wins and the built-in provider is not injected;
+- otherwise the Runner injects `codex_context` only when Node, the bridge
+  directory, and `server.mjs` are absolute, existing, regular/non-symlink
+  resources after canonicalization;
+- the effective provider uses the bundled Node and `server.mjs`, an empty
+  provider environment, and the same bounded MCP timeout contract as other
+  local providers;
+- this injection is runtime-only: WebCodex does **not** rewrite the user's
+  `runner.toml`;
+- missing/corrupt bundled resources degrade Native Context availability
+  instead of blocking the Runner or other WebCodex capabilities;
+- a local Codex CLI/app-server remains the optional **reference source** for
+  native context. The Desktop bundles Node and the Bridge, not the Codex
+  model. If the reference CLI is unavailable, the Native Context status is
+  unavailable while the rest of WebCodex remains usable.
+
+The Desktop state exposes bundled Node, bundled Bridge, Codex reference, and
+effective Native Context readiness. The Workspace status strip surfaces this
+as `Native Context`, so an end user can tell whether the optional reference
+capability is ready without inspecting filesystem paths or Runner TOML.
+
+The build must run the bundled Bridge `self-check.mjs` with the bundled Node
+and require `native_model_turns = 0` before producing a candidate. Build
+provenance records both bundled tool versions and hashes.
+
 The startup path is intentionally narrow:
 
 - the bridge must be advertised by the **same Runner** that owns the resolved Project;

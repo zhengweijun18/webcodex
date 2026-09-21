@@ -102,6 +102,13 @@ export interface BinaryInfo {
   source: string;
 }
 
+export interface EnhancedRuntimeSnapshot {
+  bundled_node_ready: boolean;
+  bundled_context_bridge_ready: boolean;
+  native_codex_reference_available: boolean;
+  native_context_ready: boolean;
+}
+
 export interface QuickShareState {
   provider: string;
   project: string;
@@ -182,6 +189,7 @@ export interface DesktopState {
   readiness: ReadinessSnapshot;
   project?: ProjectSelection | null;
   binaries?: BinaryInfo | null;
+  enhanced_runtime?: EnhancedRuntimeSnapshot | null;
   powershell_runtime?: PowerShellRuntimeSnapshot | null;
   chatgpt_activity?: ChatGptActivitySnapshot | null;
   quick_share?: QuickShareState | null;

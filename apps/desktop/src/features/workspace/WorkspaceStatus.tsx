@@ -21,7 +21,12 @@ export function statusKey(status: string | undefined): ProductKey {
 export function WorkspaceStatus({ state }: { state: DesktopState }) {
   const p = useProduct();
   const tunnel = state.regular_tunnel?.status || (state.topology?.experience === "quick_share" && state.readiness.exposure === "remote_ready" ? "ready" : state.readiness.exposure === "starting" ? "starting" : state.readiness.exposure === "error" || state.readiness.exposure === "degraded" ? "unavailable" : state.readiness.exposure === "unknown" || state.topology?.server.kind === "remote" ? "unknown" : "stopped");
-  const values = [["Server", state.readiness.server], ["Runner", state.readiness.runner], ["Secure Tunnel", tunnel]];
+  const nativeContext = !state.enhanced_runtime
+    ? "unknown"
+    : state.enhanced_runtime.native_context_ready
+      ? "ready"
+      : "unavailable";
+  const values = [["Server", state.readiness.server], ["Runner", state.readiness.runner], ["Secure Tunnel", tunnel], ["Native Context", nativeContext]];
   return <dl className="workspace-status-strip" aria-label={p("workspace")} role="status">
     {values.map(([name, status]) => <div key={name}><dt>{name}</dt><dd><i className={`status-dot ${status === "ready" ? "ready" : status === "error" ? "error" : "unknown"}`} aria-hidden="true" />{p(statusKey(status))}</dd></div>)}
   </dl>;

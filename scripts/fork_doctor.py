@@ -202,6 +202,54 @@ def check_installed_desktop(root: Path, app: Path):
     )
 
 
+def check_installed_enhanced_runtime(root: Path, app: Path):
+    if platform.system() != "Darwin":
+        return skipped("installed enhanced-runtime check is macOS-only")
+    tools = app / "Contents/Resources/webcodex-tools"
+    node = tools / "node/node"
+    bridge = tools / "codex-context-bridge"
+    required_bridge_files = (
+        "bridge-lib.mjs",
+        "package.json",
+        "server.mjs",
+        "self-check.mjs",
+    )
+    missing = [
+        str(path.relative_to(app))
+        for path in (node, *(bridge / name for name in required_bridge_files))
+        if not path.is_file() or path.is_symlink()
+    ]
+    if missing:
+        return warning(
+            "installed Desktop predates or is missing single-install enhanced runtime resources",
+            {"missing_resources": missing},
+        )
+
+    node_version = run([str(node), "--version"], cwd=root).stdout.strip()
+    package = json.loads((bridge / "package.json").read_text(encoding="utf-8"))
+    bridge_version = package.get("version")
+    self_check = run([str(node), str(bridge / "self-check.mjs")], cwd=root, timeout=60)
+    payload = json.loads(self_check.stdout)
+    data = {
+        "bundled_node_version": node_version,
+        "context_bridge_version": bridge_version,
+        "bridge_self_check_status": payload.get("status"),
+        "native_model_turns": payload.get("native_model_turns"),
+    }
+    if payload.get("status") != "pass":
+        raise RuntimeError(f"bundled Context Bridge self-check failed: {payload}")
+    if payload.get("bridge_version") != bridge_version:
+        raise RuntimeError(
+            "bundled Context Bridge self-check version does not match package metadata"
+        )
+    if payload.get("native_model_turns") != 0:
+        raise RuntimeError("bundled Context Bridge self-check started a native model turn")
+    return passed(
+        "installed Desktop contains a self-checked bundled Node + Context Bridge runtime",
+        data,
+    )
+
+
 def runtime_affecting_paths(paths: list[str]) -> list[str]:
     return [
         path
@@ -611,6 +659,11 @@ def main() -> int:
     record(checks, "remotes", lambda: check_remotes(root, args.origin_url))
     record(checks, "maintenance-branches", lambda: check_branches(root, DEFAULT_BRANCHES))
     record(checks, "installed-desktop", lambda: check_installed_desktop(root, args.installed_app))
+    record(
+        checks,
+        "installed-enhanced-runtime",
+        lambda: check_installed_enhanced_runtime(root, args.installed_app),
+    )
     record(checks, "deployment-gap", lambda: check_deployment_gap(root, args.installed_app))
     record(checks, "rollback-backup", lambda: check_backup(root, args.backup_dir))
     record(checks, "vue-lsp-toolchain", lambda: check_vue_tool(root, args.vue_tool_root))

@@ -31,13 +31,25 @@ pub struct RunnerConnectionObservation {
 pub struct WebCodexAdapter {
     binaries: Option<ResolvedBinaries>,
     bundled_runtime_dir: Option<PathBuf>,
+    bundled_context_bridge: Option<BundledContextBridge>,
+}
+
+#[derive(Debug, Clone)]
+struct BundledContextBridge {
+    node: PathBuf,
+    directory: PathBuf,
 }
 
 impl WebCodexAdapter {
-    pub fn new(bundled_runtime_dir: Option<PathBuf>) -> Self {
+    pub fn new(bundled_runtime_dir: Option<PathBuf>, bundled_tools_dir: Option<PathBuf>) -> Self {
+        let bundled_context_bridge = bundled_tools_dir.map(|tools| BundledContextBridge {
+            node: tools.join("node").join("node"),
+            directory: tools.join("codex-context-bridge"),
+        });
         Self {
             binaries: None,
             bundled_runtime_dir,
+            bundled_context_bridge,
         }
     }
 
@@ -239,6 +251,11 @@ impl WebCodexAdapter {
             .arg("--config")
             .arg(config)
             .arg("--stop-on-stdin-eof");
+        if let Some(bridge) = &self.bundled_context_bridge {
+            command
+                .env("WEBCODEX_BUNDLED_CONTEXT_BRIDGE_NODE", &bridge.node)
+                .env("WEBCODEX_BUNDLED_CONTEXT_BRIDGE_DIR", &bridge.directory);
+        }
         configure_local_loopback_bypass_environment(&mut command);
         remove_tunnel_credentials(&mut command);
         Ok(command)
@@ -960,6 +977,7 @@ mod tests {
         let adapter = WebCodexAdapter {
             binaries: Some(binaries),
             bundled_runtime_dir: None,
+            bundled_context_bridge: None,
         };
         let local = adapter
             .quick_share_command(Path::new("repo"), "none", None)
@@ -1016,6 +1034,7 @@ mod tests {
         let adapter = WebCodexAdapter {
             binaries: Some(binaries),
             bundled_runtime_dir: None,
+            bundled_context_bridge: None,
         };
         let command = adapter
             .local_runner_command(Path::new("runner.toml"))
@@ -1052,6 +1071,41 @@ mod tests {
     }
 
     #[test]
+    fn local_runner_advertises_bundled_context_bridge_paths() {
+        let binaries = ResolvedBinaries {
+            directory: PathBuf::from("bin"),
+            webcodex: PathBuf::from("webcodex"),
+            server: PathBuf::from("webcodex-server"),
+            runner: PathBuf::from("webcodex-runner"),
+            version: "0.4.1".to_string(),
+            git_commit: "0123456789abcdef".to_string(),
+            source: super::super::cli::ResolvedBinarySource::Environment,
+        };
+        let adapter = WebCodexAdapter {
+            binaries: Some(binaries),
+            bundled_runtime_dir: None,
+            bundled_context_bridge: Some(BundledContextBridge {
+                node: PathBuf::from("/app/resources/webcodex-tools/node/node"),
+                directory: PathBuf::from("/app/resources/webcodex-tools/codex-context-bridge"),
+            }),
+        };
+        let command = adapter
+            .local_runner_command(Path::new("runner.toml"))
+            .unwrap();
+        let env: Vec<_> = command.get_envs().collect();
+        assert!(env.iter().any(|(name, value)| {
+            name.to_str() == Some("WEBCODEX_BUNDLED_CONTEXT_BRIDGE_NODE")
+                && value.and_then(|value| value.to_str())
+                    == Some("/app/resources/webcodex-tools/node/node")
+        }));
+        assert!(env.iter().any(|(name, value)| {
+            name.to_str() == Some("WEBCODEX_BUNDLED_CONTEXT_BRIDGE_DIR")
+                && value.and_then(|value| value.to_str())
+                    == Some("/app/resources/webcodex-tools/codex-context-bridge")
+        }));
+    }
+
+    #[test]
     fn regular_tunnel_uses_local_server_bootstrap_auth_and_only_inherits_control_plane_credentials()
     {
         let binaries = ResolvedBinaries {
@@ -1066,6 +1120,7 @@ mod tests {
         let adapter = WebCodexAdapter {
             binaries: Some(binaries),
             bundled_runtime_dir: None,
+            bundled_context_bridge: None,
         };
         let command = adapter
             .regular_tunnel_command(Path::new("server.env"), Some("http://127.0.0.1:7890"))
