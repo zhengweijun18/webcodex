@@ -66,6 +66,39 @@ def stable_cargo() -> str | None:
     return str(fallback) if fallback.is_file() else None
 
 
+def stable_python3() -> str:
+    candidates = []
+    explicit = os.environ.get("WEBCODEX_RETIREMENT_PYTHON")
+    if explicit:
+        candidates.append(explicit)
+    discovered = shutil.which("python3")
+    if discovered:
+        candidates.append(discovered)
+    candidates.extend(("/usr/local/bin/python3", sys.executable))
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        completed = subprocess.run(
+            [
+                candidate,
+                "-c",
+                "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if completed.returncode == 0:
+            return candidate
+    raise RuntimeError(
+        "patch-retirement verification requires Python 3.10+; "
+        "set WEBCODEX_RETIREMENT_PYTHON to an explicit interpreter"
+    )
+
+
 def verifier_environment(root: Path) -> dict[str, str]:
     env = {
         "CARGO_NET_OFFLINE": "true",
@@ -147,12 +180,13 @@ def run_verifier(
 ) -> dict[str, Any]:
     kind = verifier.get("kind")
     env = verifier_environment(root)
+    python = stable_python3()
     if kind == "behavioral_capabilities":
         scope = verifier.get("scope", "full")
         if scope not in {"quick", "full"}:
             raise RuntimeError(f"invalid behavioral verifier scope: {scope}")
         command = [
-            sys.executable,
+            python,
             str(root / "scripts/check_behavioral_capabilities.py"),
             "--root",
             str(candidate_root),
@@ -182,13 +216,73 @@ def run_verifier(
                 root / "scripts/test_local_desktop_lifecycle.py",
                 temp_root / "test_local_desktop_lifecycle.py",
             )
-            # Use a relative test path from the isolated cwd. The legacy
-            # lifecycle regression suite intentionally patches pathlib.Path;
-            # invoking the test file by absolute path changes that Python 3.7
-            # interaction and creates false cross-test failures.
-            command = [sys.executable, "test_local_desktop_lifecycle.py"]
-            completed = run(command, cwd=temp_root, timeout=120, env=env, check=False)
-            return bounded_process_result(completed, command)
+            list_command = [
+                python,
+                "-c",
+                (
+                    "import json, unittest, test_local_desktop_lifecycle as t; "
+                    "print(json.dumps(unittest.defaultTestLoader."
+                    "getTestCaseNames(t.LifecycleTests)))"
+                ),
+            ]
+            listed = run(
+                list_command,
+                cwd=temp_root,
+                timeout=30,
+                env=env,
+                check=False,
+            )
+            if listed.returncode != 0:
+                return bounded_process_result(listed, list_command)
+            try:
+                test_names = json.loads(listed.stdout)
+            except json.JSONDecodeError:
+                return {
+                    "status": "failed",
+                    "exit_code": listed.returncode,
+                    "command": list_command,
+                    "stdout_tail": listed.stdout[-3000:],
+                    "stderr_tail": "failed to enumerate lifecycle contract tests",
+                }
+            results = []
+            for test_name in test_names:
+                command = [
+                    python,
+                    "test_local_desktop_lifecycle.py",
+                    f"LifecycleTests.{test_name}",
+                ]
+                completed = run(
+                    command,
+                    cwd=temp_root,
+                    timeout=30,
+                    env=env,
+                    check=False,
+                )
+                result = bounded_process_result(completed, command)
+                result["test"] = test_name
+                results.append(result)
+                if result["status"] != "passed":
+                    return {
+                        "status": "failed",
+                        "exit_code": result["exit_code"],
+                        "command": command,
+                        "tests_total": len(test_names),
+                        "tests_executed": len(results),
+                        "failed_test": test_name,
+                        "tests": results,
+                        "stdout_tail": result["stdout_tail"],
+                        "stderr_tail": result["stderr_tail"],
+                    }
+            return {
+                "status": "passed",
+                "exit_code": 0,
+                "command": [python, "test_local_desktop_lifecycle.py", "<isolated-tests>"],
+                "tests_total": len(test_names),
+                "tests_executed": len(results),
+                "tests": results,
+                "stdout_tail": "",
+                "stderr_tail": "",
+            }
     raise RuntimeError(f"unknown retirement verifier kind: {kind}")
 
 

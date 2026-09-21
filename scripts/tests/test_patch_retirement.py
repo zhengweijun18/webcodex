@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import unittest
 from unittest import mock
 
@@ -35,6 +36,21 @@ class PatchRetirementTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(RuntimeError, "unsafe implementation path"):
             retirement.group_map(contract)
+
+    def test_stable_python3_does_not_inherit_legacy_invoking_interpreter(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["python3"], returncode=0, stdout="", stderr=""
+        )
+        with mock.patch.object(
+            retirement.shutil, "which", return_value="/usr/local/bin/python3"
+        ), mock.patch.object(
+            retirement.sys, "executable", "/usr/bin/python3"
+        ), mock.patch.object(
+            retirement.subprocess, "run", return_value=completed
+        ) as run:
+            selected = retirement.stable_python3()
+        self.assertEqual(selected, "/usr/local/bin/python3")
+        self.assertEqual(run.call_args.args[0][0], "/usr/local/bin/python3")
 
     def test_no_local_delta_is_already_upstream_native_after_current_behavior_passes(self) -> None:
         with mock.patch.object(retirement, "path_differs", return_value=False), \
