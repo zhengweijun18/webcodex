@@ -56,6 +56,11 @@ EOF
   esac
 done
 
+case "$output_root" in
+  /*) ;;
+  *) output_root="$root/$output_root" ;;
+esac
+
 [ "$(uname -s)" = "Darwin" ] || { echo "macOS is required" >&2; exit 1; }
 [ -z "$(git status --porcelain=v1 --untracked-files=all)" ] || {
   echo "source worktree must be clean" >&2
