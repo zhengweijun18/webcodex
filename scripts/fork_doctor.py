@@ -15,7 +15,7 @@ from pathlib import Path
 
 OFFICIAL_UPSTREAM = "https://github.com/yyjeqhc/webcodex.git"
 DEFAULT_BRANCHES = ("vue-lsp-native", "vue-lsp-native-main")
-RUNTIME_PREFIXES = ("crates/", "apps/", "npm/")
+RUNTIME_PREFIXES = ("crates/", "apps/", "npm/", "src/", "tooling/")
 RUNTIME_FILES = {"Cargo.toml", "Cargo.lock"}
 
 
@@ -199,6 +199,61 @@ def check_installed_desktop(root: Path, app: Path):
     return passed(
         "installed Desktop is signed/aligned; newer branch changes are maintenance-only",
         identity,
+    )
+
+
+def runtime_affecting_paths(paths: list[str]) -> list[str]:
+    return [
+        path
+        for path in paths
+        if path in RUNTIME_FILES or path.startswith(RUNTIME_PREFIXES)
+    ]
+
+
+def check_deployment_gap(root: Path, app: Path):
+    if platform.system() != "Darwin":
+        return skipped("deployment-gap check is macOS-only")
+    if not app.is_dir():
+        raise RuntimeError(f"installed Desktop is missing: {app}")
+    identity = installed_runtime(root, app)
+    source_head = git(root, "rev-parse", "HEAD")
+    installed_commit = identity["commit"]
+    data = {
+        "source_head": source_head,
+        "installed_commit": installed_commit,
+        "installed_version": identity["version"],
+        "deployment_gap": installed_commit != source_head,
+    }
+    if installed_commit != source_head:
+        return warning(
+            "deployment gap is open: installed Desktop does not match current source HEAD",
+            data,
+        )
+    return passed("deployment gap is closed: installed Desktop matches current source HEAD", data)
+
+
+def check_patch_retirement(root: Path, branch: str, upstream_ref: str):
+    changed = [
+        line
+        for line in git(root, "diff", "--name-only", f"{upstream_ref}..{branch}").splitlines()
+        if line
+    ]
+    runtime_delta = runtime_affecting_paths(changed)
+    data = {
+        "branch": branch,
+        "upstream_ref": upstream_ref,
+        "runtime_affecting_delta_count": len(runtime_delta),
+        "runtime_affecting_delta": runtime_delta[:80],
+        "retirement_ready": not runtime_delta,
+    }
+    if runtime_delta:
+        return passed(
+            "patch-retirement evaluated: local runtime delta still exists, so automatic retirement is not yet safe",
+            data,
+        )
+    return passed(
+        "patch-retirement evaluated: no local runtime delta remains; local runtime patches are retirement candidates",
+        data,
     )
 
 
@@ -471,6 +526,7 @@ def main() -> int:
     record(checks, "remotes", lambda: check_remotes(root, args.origin_url))
     record(checks, "maintenance-branches", lambda: check_branches(root, DEFAULT_BRANCHES))
     record(checks, "installed-desktop", lambda: check_installed_desktop(root, args.installed_app))
+    record(checks, "deployment-gap", lambda: check_deployment_gap(root, args.installed_app))
     record(checks, "rollback-backup", lambda: check_backup(root, args.backup_dir))
     record(checks, "vue-lsp-toolchain", lambda: check_vue_tool(root, args.vue_tool_root))
     record(checks, "git-proxy", lambda: check_git_proxy(root))
@@ -478,6 +534,11 @@ def main() -> int:
         checks,
         "upstream-state",
         lambda: check_upstream_state(root, args.forward_branch, args.upstream_ref),
+    )
+    record(
+        checks,
+        "patch-retirement",
+        lambda: check_patch_retirement(root, args.forward_branch, args.upstream_ref),
     )
     record(checks, "capability-contract", lambda: check_capability_contract(root, args.context_workspace))
     record(
