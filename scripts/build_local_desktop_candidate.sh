@@ -15,6 +15,13 @@ else
   exit 127
 fi
 export PATH="$(dirname "$cargo_bin"):$PATH"
+if [ -z "${CARGO_HTTP_PROXY:-}" ]; then
+  if [ -n "${HTTPS_PROXY:-}" ]; then
+    export CARGO_HTTP_PROXY="$HTTPS_PROXY"
+  elif [ -n "${https_proxy:-}" ]; then
+    export CARGO_HTTP_PROXY="$https_proxy"
+  fi
+fi
 
 reuse_runtime=0
 output_root="$root/target/local-fork-desktop"
