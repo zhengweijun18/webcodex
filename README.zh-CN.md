@@ -6,6 +6,100 @@
 
 你可以直接让 AI 理解项目、修改代码、运行测试、检查 Git 或排查问题。仓库仍然留在原来的机器上，不需要为了使用 WebCodex 把整个项目搬到托管环境里。
 
+## 这个 Fork 的核心增强：Zero-Quota 原生 Codex 逼近
+
+> **一句话先说清楚：**这套 Fork 是为了让 **ChatGPT + WebCodex 更像一个可靠的本地开发 Agent**——它能自动理解项目、真正操作本机代码、跑长任务、断线后继续、安全处理真实副作用、使用 Vue LSP、自己判断补丁何时可以退休，还能安全升级 Desktop；同时 **Native Codex 模型调用保持为 0**。
+
+增强实现分支：[`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)
+当前已验证基线：`3082590b87de6f023d775c98f8a082df6b4168c4`
+
+### 14 个核心功能点
+
+1. **ChatGPT 直接操作本机真实项目**：读取、搜索、修改代码，看 Git/Diff，运行编译、测试、格式化和项目自己的工具链，不只是给建议，而是可以真正把任务做完。
+2. **自动理解项目规则、AGENTS、Skill、Knowledge**：AI 开工前自动获得根目录和子目录 `AGENTS.md`、可用 Skill、Knowledge、Hook/Runtime Context、当前工作区和 Workflow 状态，不需要每次从头解释“这个项目怎么玩”。
+3. **Zero-Quota 读取 Codex Runtime Context**：可以把 Codex 当作 Runtime 参考，读取可观察的上下文能力，但不会启动 Native Codex model turn，也不会在 WebCodex 做不了时偷偷 fallback 到 Codex Agent。
+4. **Skill / Knowledge 不暴露真实本机路径**：模型通过 Skill 名称、opaque id、semantic key 工作，不需要知道 `/Users/xxx/...` 这类开发机绝对路径；遇到同名/歧义 Skill 会停下来，不会偷偷乱选。
+5. **长任务 Job 不跟聊天一起丢**：build、test 等长任务和聊天 Session 分开；一次对话结束后 Job 还可以继续跑、继续观察，不需要因为模型 turn 结束而重启任务。
+6. **Workflow Session 可恢复**：断线、重连、Runner/Runtime 重启后，可以恢复当前 Workflow、验证证据和 Native Context 连续性，而不是重新开一个会话猜“之前做到哪了”。
+7. **有副作用的操作不盲目重试**：push、安装、文件修改等操作如果已经发出但回执丢了，会先标记结果不确定、检查真实现场，再决定是否重试；不会因为“没收到返回”就直接执行第二遍，也不会静默换 Runner。
+8. **测试 / 验证结果更可靠**：以真实命令终态和 exit code 判断成功/失败，避免 `cargo fmt --check` 这种“成功但没有 stdout”的命令被记成历史假失败。
+9. **Vue / 前端真实 LSP 能力**：支持 Vue SFC 的定义跳转、引用、诊断、符号等 IDE 级能力，并固定 Vue Language Server / TypeScript 工具链，不只靠 grep 文本理解代码。
+10. **Desktop one-shot 安全升级、失败自动回滚**：新版本先验证，再备份旧版本，精确退出 App 自身进程，只启动一次，检查 Server/Runner 健康；成功后设为 Last Known Good，失败则自动恢复旧版本。
+11. **Fork 自动判断本地补丁什么时候可以退休**：不再因为“这是我的 Fork 补丁”就永久保留；只有 upstream 自己能过行为验证，并且拿掉本地实现后仍然 PASS，才允许删除这块本地 patch。
+12. **Upstream 升级先在临时 worktree 演习**：先在 disposable worktree 里测试 rebase/merge、编译和能力行为，不直接改真实维护分支，避免一次上游升级把正在用的分支弄乱。
+13. **自带 Doctor 健康检查**：可以机器化检查源码、已安装 Desktop、正在运行的 Server/Runner、rollback backup、Vue 工具链、Zero-Quota evidence、Context Bridge、upstream 状态和 deployment alignment。
+14. **Desktop 构建可追溯到精确源码和工具链**：每个正式候选都能回答“它到底由哪个 commit 编出来、是不是 dirty build、Rust/Node/Vue 工具链是什么、三个 runtime binary 是不是同一版本、SHA256 是什么”。
+
+### 你实际使用时，大概是什么体验
+
+```text
+你给 ChatGPT 一个任务
+        ↓
+WebCodex 打开你本机真实项目
+        ↓
+自动读取项目规则 / AGENTS / Skill / Knowledge / 当前现场
+        ↓
+AI 分析代码和 LSP 信息
+        ↓
+修改真实文件、运行真实本机工具链
+        ↓
+build / test 等长任务交给 Job 持续运行
+        ↓
+失败就根据真实证据继续修
+        ↓
+验证通过 → review / commit / 交付
+```
+
+实际最大的变化是：你不需要每次重新把项目规范、目录结构、可用 Skill / Knowledge、编译器和测试方式、当前 Git / 工作区状态、上一次任务做到哪里，再复制给 AI。
+
+### 相比普通 WebCodex，多了什么
+
+| `vue-lsp-native-main` 增强能力 | 你实际感受到的变化 |
+|---|---|
+| Zero-Quota Native Context | 借鉴可观察的 Codex Runtime Context，但不消耗 Native Codex 模型额度 |
+| 自动项目上下文 | AI 开工前自动知道项目规则、局部 AGENTS、Skill、Knowledge 和当前 Workflow |
+| Pathless Skill / Knowledge | 模型不需要依赖开发机绝对文件路径 |
+| Durable Job | 长时间 build/test 不会因为一次聊天结束就消失 |
+| Workflow 恢复 | 断线、重启后能从真实现场继续，不需要重新猜上下文 |
+| 安全副作用处理 | push/安装/修改结果不确定时先检查，不盲目重放 |
+| Structured Validation | “成功但没输出”的命令不会被记成假失败 |
+| Native Vue LSP | AI 可以像 IDE 一样理解 Vue 代码，不只靠文本搜索 |
+| Desktop one-shot adopt | 升级有验证、备份、健康检查、LKG 和自动 rollback |
+| Self-Maintaining Fork | 上游实现同等能力后，本地 patch 可以有证据地退休 |
+| Doctor | 一条检查判断源码、运行版、工具链、rollback、Zero-Quota 是否健康 |
+| 可追溯构建 | `.app` 可以追溯到精确源码 SHA 和工具链 |
+
+### 当前已经真实验证过什么
+
+当前 `3082590b` 基线不是“文档说支持”，而是有机器验证证据：
+
+- **Context Bridge black-box：PASS**
+- **Native Context runtime：8/8 PASS**
+- **Scoped Project Instructions：PASS**
+- **Workflow Native Context continuity：PASS**
+- **Required Capability Contract：12/12 PASS**
+- **Desktop lifecycle regression：17/17 PASS**
+- **Upstream compatibility rehearsal：PASS**
+- **Native Codex model turns：0**
+- **Source HEAD = Installed Desktop = Running Server/Runner：全部对齐到 `3082590b87de`**
+
+### 哪些能力明确不属于这个 Goal
+
+这套 Fork **没有**也**不声称**复制：OpenAI 私有 Codex Host 内部实现、Codex 模型 reasoning/planning、模型自己的 tool-selection intelligence、OpenAI 不公开的内部状态，以及 Native Codex TUI。
+
+所以这里说的“原生 Codex 逼近”，准确含义是：
+
+> **把能够观察、能够验证、能够独立实现的 Runtime 行为尽量补到 WebCodex；真正属于模型和私有 Host 的部分，仍然由 ChatGPT / OpenAI 模型自己负责。**
+
+### 完整交接包
+
+- [下载 `WebCodex-Zero-Quota-3082590b-macOS-Intel.zip`](deliverables/WebCodex-Zero-Quota-3082590b-macOS-Intel.zip)
+- [交接包说明与 SHA256](deliverables/README.md)
+
+交接包里包含：可安装 Desktop、精确源码快照、Zero-Quota Context Bridge、机器验证报告、校验和，以及更详细的《原生 Codex 逼近能力说明（大白话版）》。
+
+**最后一句大白话总结：**这套 Fork 的价值不是“多几个工具”，而是让 ChatGPT + WebCodex 变成一个更可靠的本地开发 Agent——**懂项目、能真正动手、长任务不断、断线能恢复、真实操作不乱重试、Desktop 能安全升级、上游变化还能长期维护，而且不消耗 Native Codex 模型额度。**
+
 ## 开始使用
 
 ### 日常使用：完整 WebCodex（推荐）
@@ -39,32 +133,6 @@ npx --yes @yyjeqhc/webcodex share
 - **AI 使用的是真实开发环境。** 文件、Git、编译器、测试和已有工具链都可以直接复用。
 - **工作不局限于一次请求。** 长时间执行、测试结果和相关证据可以继续观察。
 - **既能临时使用，也能长期部署。** 可以一条命令快速分享，也可以连接到自托管服务长期使用。
-
-## 本 Fork 的增强能力：Zero-Quota 原生 Codex 逼近
-
-这个 Fork 另外维护了一条增强分支 [`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)，目标是让 **ChatGPT + WebCodex 更像一个可靠的本地开发 Agent，同时保持 Native Codex 模型调用为 0**。
-
-当前已验证基线：`3082590b87de6f023d775c98f8a082df6b4168c4`。
-
-这条增强分支主要增加了这些能力：
-
-- **Zero-Quota Native Context**：可以读取可观察的 Codex Runtime 上下文，例如 Skill、项目规则、Hook、Knowledge，但不会启动 Native Codex model turn，也不会在 WebCodex 做不了时偷偷 fallback 到 Codex Agent。
-- **自动项目上下文**：AI 开工前可自动拿到根目录/子目录 `AGENTS.md`、可用 Skill、Knowledge、Runtime Context 和 Workflow 当前现场，不需要每次重新解释项目怎么玩。
-- **Skill / Knowledge 不依赖本机绝对路径**：模型通过 Skill 名称、opaque id、semantic key 工作，避免把开发机目录结构变成接口。
-- **长任务和 Workflow 可恢复**：build/test 等后台 Job 不跟一次聊天一起消失；断线、重连、Runtime 重启后可以继续观察任务和恢复当前工作上下文。
-- **真实操作更安全**：push、安装、文件修改等操作如果结果不确定，不会直接重复执行；retry 不会偷偷延长原 deadline，也不会静默换到另一个 Runner。
-- **验证结果更可信**：以真实终态和 exit code 判断成功/失败，避免 `cargo fmt --check` 这类“成功但没有输出”的命令被记成假失败。
-- **原生 Vue LSP**：支持 Vue SFC 的定义跳转、引用、诊断、符号等能力，并使用固定的 Vue Language Server / TypeScript 工具链。
-- **Desktop one-shot 安全升级**：候选版本验证、当前版本备份、精确退出 App 自身进程、只启动一次、健康检查、Last Known Good、失败自动回滚。
-- **Self-Maintaining Fork**：不是看“补丁还能不能套”，而是通过行为验证判断 upstream 是否已经真正实现同等能力；只有验证通过，本地 patch 才允许退休。
-- **Doctor + 可追溯构建**：可以机器化检查源码、已安装 Desktop、正在运行的 Server/Runner、rollback、工具链、Zero-Quota 证据和构建 provenance 是否一致。
-
-这里的“逼近原生 Codex”只指 **可观察、可验证的 Runtime 行为**，不代表复制 OpenAI 私有 Codex Host、模型 reasoning/planning、模型自己的 tool-selection intelligence 或 Native Codex TUI。
-
-当前验证版的 macOS Intel 完整交接包也已同步到仓库：
-
-- [WebCodex-Zero-Quota-3082590b-macOS-Intel.zip](deliverables/WebCodex-Zero-Quota-3082590b-macOS-Intel.zip)
-- [交接包说明与 SHA256](deliverables/README.md)
 
 ## 工作方式
 
