@@ -63,7 +63,7 @@ def run_probe(root: Path, name: str, argv: list[str], timeout: int) -> dict:
         }
 
 
-def check(root: Path, scope: str) -> dict:
+def check(root: Path, scope: str, *, fail_fast: bool = False) -> dict:
     cargo = cargo_binary()
     node = shutil.which("node")
     if not node:
@@ -104,11 +104,17 @@ def check(root: Path, scope: str) -> dict:
     ]
     if scope == "quick":
         probes = probes[:1]
-    results = [run_probe(root, *probe) for probe in probes]
+    results = []
+    for probe in probes:
+        result = run_probe(root, *probe)
+        results.append(result)
+        if fail_fast and result["status"] != "passed":
+            break
     failures = [item["name"] for item in results if item["status"] != "passed"]
     return {
         "status": "passed" if not failures else "failed",
         "scope": scope,
+        "fail_fast": fail_fast,
         "probes": results,
         "failed_probes": failures,
         "mutations_performed": False,
@@ -120,9 +126,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--scope", choices=("quick", "full"), default="full")
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="stop after the first failed required probe",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    result = check(args.root.resolve(), args.scope)
+    result = check(args.root.resolve(), args.scope, fail_fast=args.fail_fast)
     if args.json:
         print(json.dumps(result, indent=2))
     else:

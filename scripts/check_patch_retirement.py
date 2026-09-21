@@ -69,7 +69,9 @@ def stable_cargo() -> str | None:
 def verifier_environment(root: Path) -> dict[str, str]:
     env = {
         "CARGO_NET_OFFLINE": "true",
-        "CARGO_TARGET_DIR": str(root / "target/patch-retirement-cargo"),
+        # Reuse the ignored main target cache. A dedicated retirement target
+        # duplicates multi-gigabyte Rust artifacts and can exhaust disk space.
+        "CARGO_TARGET_DIR": str(root / "target"),
     }
     cargo = stable_cargo()
     if cargo:
@@ -156,6 +158,7 @@ def run_verifier(
             str(candidate_root),
             "--scope",
             scope,
+            "--fail-fast",
             "--json",
         ]
         completed = run(command, cwd=root, timeout=600, env=env, check=False)
@@ -179,7 +182,11 @@ def run_verifier(
                 root / "scripts/test_local_desktop_lifecycle.py",
                 temp_root / "test_local_desktop_lifecycle.py",
             )
-            command = [sys.executable, str(temp_root / "test_local_desktop_lifecycle.py")]
+            # Use a relative test path from the isolated cwd. The legacy
+            # lifecycle regression suite intentionally patches pathlib.Path;
+            # invoking the test file by absolute path changes that Python 3.7
+            # interaction and creates false cross-test failures.
+            command = [sys.executable, "test_local_desktop_lifecycle.py"]
             completed = run(command, cwd=temp_root, timeout=120, env=env, check=False)
             return bounded_process_result(completed, command)
     raise RuntimeError(f"unknown retirement verifier kind: {kind}")
