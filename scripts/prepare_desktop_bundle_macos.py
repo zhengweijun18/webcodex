@@ -16,7 +16,14 @@ from pathlib import Path
 
 
 BINARIES = ("webcodex", "webcodex-server", "webcodex-runner")
-BRIDGE_FILES = ("bridge-lib.mjs", "README.md", "package.json", "server.mjs", "self-check.mjs")
+BRIDGE_FILES = (
+    "bridge-lib.mjs",
+    "readiness.mjs",
+    "README.md",
+    "package.json",
+    "server.mjs",
+    "self-check.mjs",
+)
 PLATFORM_ARCH = {
     "darwin-x64": ("x86_64", "x86_64"),
     "darwin-arm64": ("arm64", "arm64"),

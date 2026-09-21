@@ -97,12 +97,19 @@ provider source:
 
 - if the operator already configured provider id `codex_context`, the
   operator configuration wins and the built-in provider is not injected;
-- otherwise the Runner injects `codex_context` only when Node, the bridge
-  directory, and `server.mjs` are absolute, existing, regular/non-symlink
-  resources after canonicalization;
-- the effective provider uses the bundled Node and `server.mjs`, an empty
-  provider environment, and the same bounded MCP timeout contract as other
-  local providers;
+- otherwise Desktop and Runner both execute the bundled `readiness.mjs`.
+  That module is the authority for Codex executable discovery and one shared
+  zero-model-turn readiness contract: it verifies Codex app-server
+  `initialize -> skills/list`, then starts the actual bundled Bridge Provider,
+  verifies MCP `initialize -> tools/list`, and performs a harmless
+  `read_user_agents` tool call;
+- supported Codex entry-point symlinks are allowed, but the resolver follows
+  them and validates the canonical final executable. An explicit invalid
+  `CODEX_BIN` fails closed rather than silently falling back to another Codex;
+- the Runner injects `codex_context` only after the same readiness probe
+  reports `ready` and `native_model_turns = 0`. It passes the exact
+  canonical `CODEX_BIN` plus a bounded non-secret execution environment to
+  the bundled Bridge;
 - this injection is runtime-only: WebCodex does **not** rewrite the user's
   `runner.toml`;
 - missing/corrupt bundled resources degrade Native Context availability
@@ -112,14 +119,24 @@ provider source:
   model. If the reference CLI is unavailable, the Native Context status is
   unavailable while the rest of WebCodex remains usable.
 
-The Desktop state exposes bundled Node, bundled Bridge, Codex reference, and
-effective Native Context readiness. The Workspace status strip surfaces this
-as `Native Context`, so an end user can tell whether the optional reference
-capability is ready without inspecting filesystem paths or Runner TOML.
+The Desktop state exposes structured component readiness with bounded
+`status/reason/owner/impact/next_action/observed_at/source_version` fields.
+It refreshes the enhanced runtime observation periodically instead of treating
+startup file presence as permanent truth. The Workspace status strip surfaces
+`Native Context` and `Vue LSP`; non-ready components expose their reason and
+next-action key without exposing the canonical Codex path.
 
-The build must run the bundled Bridge `self-check.mjs` with the bundled Node
-and require `native_model_turns = 0` before producing a candidate. Build
-provenance records both bundled tool versions and hashes.
+Vue LSP is intentionally **not** part of the current single-install bundle.
+The Desktop reports it as an external pinned toolchain and verifies the
+expected Vue Language Server 2.2.12 plus TypeScript 5.9.3 installation. Missing
+or drifted Vue tooling affects only Vue LSP readiness and must not be described
+as a bundled Desktop capability.
+
+The build must run the bundled Bridge `self-check.mjs` and the real
+`readiness.mjs` with the bundled Node, require `native_model_turns = 0`, and
+record the path-free structured readiness result before producing a candidate.
+Build provenance records bundled tool versions, hashes, and that readiness
+observation.
 
 The startup path is intentionally narrow:
 

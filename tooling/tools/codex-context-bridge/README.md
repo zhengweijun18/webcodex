@@ -2,6 +2,8 @@
 
 把本机 Codex 的可观察上下文通过 Runner 内部 MCP 提供给 WebCodex。它是 WebCodex fork 的可复现运行组件，不是模型可直接枚举/调用的通用 MCP Provider。它不复制 Native Host 或模型智能，也不产生 Codex model turn。
 
+当前 Bridge 版本为 **0.5.1**。`readiness.mjs` 是 Desktop、Runner 与 Bridge 共同使用的 Codex reference 真相源：允许受支持的 CLI symlink 入口，但必须 canonicalize 到最终 regular executable；显式无效的 `CODEX_BIN` 会 fail closed，不会静默改用另一份 Codex。
+
 ## 能力
 
 - `bootstrap_context`：读取用户级 `AGENTS.md`、原生 Codex Skill catalog、Hook registry、
@@ -23,10 +25,17 @@
 - `sessionEnd` 只应在真实会话结束时派发；不要把普通一轮回复当作 session end。
 - Bridge Hook runtime 是可观察语义的近似层，不冒充 OpenAI private Host lifecycle；`host_lifecycle_intercept=false` 是上层必须保持的边界。
 - Bridge 不缓存正文；fingerprint 覆盖 Skill body、knowledge entry SHA 与上层 instruction fingerprint，用于 Workflow Session resume 的 stale 检测。
+- Native Context readiness 在同一个有界预算内同时验证 canonical Codex reference、Codex app-server `initialize → initialized → skills/list`，以及实际 bundled Bridge Provider 的 MCP `initialize → tools/list → read_user_agents`。`native_model_turns` 必须保持 `0`；它不启动 Codex model turn，也不代表 private Host/TUI 等价。
 
 ## 本地自检
 
 ```bash
 node tooling/tools/codex-context-bridge/self-check.mjs
+```
+
+检查当前真实 Codex reference：
+
+```bash
+node tooling/tools/codex-context-bridge/readiness.mjs --json --timeout-ms 3000
 ```
 

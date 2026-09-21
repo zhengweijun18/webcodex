@@ -210,6 +210,7 @@ def check_installed_enhanced_runtime(root: Path, app: Path):
     bridge = tools / "codex-context-bridge"
     required_bridge_files = (
         "bridge-lib.mjs",
+        "readiness.mjs",
         "package.json",
         "server.mjs",
         "self-check.mjs",
@@ -230,11 +231,30 @@ def check_installed_enhanced_runtime(root: Path, app: Path):
     bridge_version = package.get("version")
     self_check = run([str(node), str(bridge / "self-check.mjs")], cwd=root, timeout=60)
     payload = json.loads(self_check.stdout)
+    readiness = run(
+        [str(node), str(bridge / "readiness.mjs"), "--json", "--timeout-ms", "3000"],
+        cwd=root,
+        timeout=10,
+        check=False,
+    )
+    try:
+        readiness_payload = json.loads(readiness.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"bundled Context Bridge readiness returned invalid JSON: {readiness.stderr[-1000:]}"
+        ) from exc
     data = {
         "bundled_node_version": node_version,
         "context_bridge_version": bridge_version,
         "bridge_self_check_status": payload.get("status"),
         "native_model_turns": payload.get("native_model_turns"),
+        "native_context_status": readiness_payload.get("status"),
+        "native_context_reason": readiness_payload.get("reason"),
+        "native_context_owner": readiness_payload.get("owner"),
+        "native_context_impact": readiness_payload.get("impact"),
+        "native_context_next_action": readiness_payload.get("next_action"),
+        "native_context_observed_at_ms": readiness_payload.get("observed_at_ms"),
+        "native_context_source_version": readiness_payload.get("source_version"),
     }
     if payload.get("status") != "pass":
         raise RuntimeError(f"bundled Context Bridge self-check failed: {payload}")
@@ -244,8 +264,23 @@ def check_installed_enhanced_runtime(root: Path, app: Path):
         )
     if payload.get("native_model_turns") != 0:
         raise RuntimeError("bundled Context Bridge self-check started a native model turn")
+    if readiness.returncode != 0:
+        raise RuntimeError(
+            f"bundled Context Bridge readiness probe failed to execute: {readiness.stderr[-1000:]}"
+        )
+    if readiness_payload.get("native_model_turns") != 0:
+        raise RuntimeError("bundled Context Bridge readiness probe started a native model turn")
+    if readiness_payload.get("source_version") != bridge_version:
+        raise RuntimeError(
+            "bundled Context Bridge readiness version does not match package metadata"
+        )
+    if readiness_payload.get("status") != "ready":
+        return warning(
+            "installed enhanced runtime is healthy, but Native Context is not currently ready",
+            data,
+        )
     return passed(
-        "installed Desktop contains a self-checked bundled Node + Context Bridge runtime",
+        "installed Desktop contains a self-checked bundled Node + Context Bridge runtime and a ready zero-turn Native Context reference",
         data,
     )
 

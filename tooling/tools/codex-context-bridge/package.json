@@ -1,9 +1,10 @@
 {
   "name": "webcodex-codex-context-bridge",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "self-check": "node self-check.mjs"
+    "self-check": "node self-check.mjs",
+    "readiness": "node readiness.mjs --json --timeout-ms 3000"
   }
 }

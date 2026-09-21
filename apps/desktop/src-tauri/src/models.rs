@@ -243,11 +243,22 @@ pub struct BinaryInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct EnhancedRuntimeComponentSnapshot {
+    pub status: String,
+    pub reason: String,
+    pub owner: String,
+    pub impact: String,
+    pub next_action: String,
+    pub observed_at_ms: u64,
+    pub source_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct EnhancedRuntimeSnapshot {
-    pub bundled_node_ready: bool,
-    pub bundled_context_bridge_ready: bool,
-    pub native_codex_reference_available: bool,
-    pub native_context_ready: bool,
+    pub bundled_node: EnhancedRuntimeComponentSnapshot,
+    pub bundled_context_bridge: EnhancedRuntimeComponentSnapshot,
+    pub native_context: EnhancedRuntimeComponentSnapshot,
+    pub vue_lsp: EnhancedRuntimeComponentSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -2,6 +2,7 @@ mod activity;
 mod commands;
 mod deadline;
 mod desktop_shell;
+mod enhanced_runtime;
 mod error;
 mod models;
 mod operation;

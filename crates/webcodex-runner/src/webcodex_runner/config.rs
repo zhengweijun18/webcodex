@@ -18,6 +18,7 @@ use crate::runner_protocol::{
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
@@ -29,6 +30,15 @@ pub(crate) const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_SECS: u64 = 5;
 const BUNDLED_CONTEXT_BRIDGE_NODE_ENV: &str = "WEBCODEX_BUNDLED_CONTEXT_BRIDGE_NODE";
 const BUNDLED_CONTEXT_BRIDGE_DIR_ENV: &str = "WEBCODEX_BUNDLED_CONTEXT_BRIDGE_DIR";
 const BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID: &str = "codex_context";
+const BUNDLED_CONTEXT_READINESS_TIMEOUT_MS: &str = "3000";
+
+#[derive(Debug, Deserialize)]
+struct BundledContextReadinessProbe {
+    status: String,
+    canonical_path: Option<String>,
+    source_version: String,
+    native_model_turns: u64,
+}
 
 const DEFAULT_ACP_MAX_CONCURRENT_RUNS: usize = 1;
 const ACP_MIN_CONCURRENT_RUNS: usize = 1;
@@ -1633,17 +1643,101 @@ pub(crate) fn load_config(path: &Path) -> Result<RunnerConfig, String> {
 }
 
 fn inject_bundled_context_bridge_from_env(config: &mut McpGatewayConfig) -> bool {
-    inject_bundled_context_bridge(
-        config,
-        std::env::var_os(BUNDLED_CONTEXT_BRIDGE_NODE_ENV).map(PathBuf::from),
-        std::env::var_os(BUNDLED_CONTEXT_BRIDGE_DIR_ENV).map(PathBuf::from),
-    )
+    use crate::mcp_gateway::MCP_GATEWAY_MAX_PROVIDERS;
+    if config
+        .providers
+        .iter()
+        .any(|provider| provider.id == BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID)
+        || config.providers.len() >= MCP_GATEWAY_MAX_PROVIDERS
+    {
+        return false;
+    }
+    let node = std::env::var_os(BUNDLED_CONTEXT_BRIDGE_NODE_ENV).map(PathBuf::from);
+    let bridge_dir = std::env::var_os(BUNDLED_CONTEXT_BRIDGE_DIR_ENV).map(PathBuf::from);
+    let (Some(node), Some(bridge_dir)) = (node, bridge_dir) else {
+        return false;
+    };
+    let Some(readiness) = bundled_context_readiness(&node, &bridge_dir) else {
+        return false;
+    };
+    if readiness.status != "ready"
+        || readiness.native_model_turns != 0
+        || readiness.source_version.trim().is_empty()
+    {
+        return false;
+    }
+    let Some(codex) = readiness.canonical_path.map(PathBuf::from) else {
+        return false;
+    };
+    inject_bundled_context_bridge(config, Some(node), Some(bridge_dir), Some(codex))
+}
+
+fn bundled_context_readiness(
+    node: &Path,
+    bridge_dir: &Path,
+) -> Option<BundledContextReadinessProbe> {
+    if !node.is_absolute() || !bridge_dir.is_absolute() {
+        return None;
+    }
+    let node_metadata = std::fs::symlink_metadata(node).ok()?;
+    let bridge_metadata = std::fs::symlink_metadata(bridge_dir).ok()?;
+    if !node_metadata.is_file()
+        || node_metadata.file_type().is_symlink()
+        || !bridge_metadata.is_dir()
+        || bridge_metadata.file_type().is_symlink()
+    {
+        return None;
+    }
+    let node = node.canonicalize().ok()?;
+    let bridge_dir = bridge_dir.canonicalize().ok()?;
+    if !node.is_file() || !bridge_dir.is_dir() {
+        return None;
+    }
+    let readiness_source = bridge_dir.join("readiness.mjs");
+    let readiness_metadata = std::fs::symlink_metadata(&readiness_source).ok()?;
+    if !readiness_metadata.is_file() || readiness_metadata.file_type().is_symlink() {
+        return None;
+    }
+    let readiness = readiness_source.canonicalize().ok()?;
+    if readiness.parent() != Some(bridge_dir.as_path()) || !readiness.is_file() {
+        return None;
+    }
+    let mut command = Command::new(&node);
+    command
+        .arg(&readiness)
+        .arg("--json")
+        .arg("--timeout-ms")
+        .arg(BUNDLED_CONTEXT_READINESS_TIMEOUT_MS)
+        .env_clear();
+    for key in [
+        "HOME",
+        "PATH",
+        "CODEX_BIN",
+        "CODEX_HOME",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+    ] {
+        if let Some(value) = std::env::var_os(key).filter(|value| !value.is_empty()) {
+            command.env(key, value);
+        }
+    }
+    #[cfg(windows)]
+    if let Some(value) = std::env::var_os("SYSTEMROOT").filter(|value| !value.is_empty()) {
+        command.env("SYSTEMROOT", value);
+    }
+    let output = command.output().ok()?;
+    if !output.status.success() || output.stdout.len() > 64 * 1024 {
+        return None;
+    }
+    serde_json::from_slice(&output.stdout).ok()
 }
 
 fn inject_bundled_context_bridge(
     config: &mut McpGatewayConfig,
     node: Option<PathBuf>,
     bridge_dir: Option<PathBuf>,
+    codex: Option<PathBuf>,
 ) -> bool {
     use crate::mcp_gateway::MCP_GATEWAY_MAX_PROVIDERS;
 
@@ -1655,10 +1749,10 @@ fn inject_bundled_context_bridge(
     {
         return false;
     }
-    let (Some(node), Some(bridge_dir)) = (node, bridge_dir) else {
+    let (Some(node), Some(bridge_dir), Some(codex)) = (node, bridge_dir, codex) else {
         return false;
     };
-    if !node.is_absolute() || !bridge_dir.is_absolute() {
+    if !node.is_absolute() || !bridge_dir.is_absolute() || !codex.is_absolute() {
         return false;
     }
     let Ok(node_metadata) = std::fs::symlink_metadata(&node) else {
@@ -1680,15 +1774,47 @@ fn inject_bundled_context_bridge(
     if !server_metadata.is_file() || server_metadata.file_type().is_symlink() {
         return false;
     }
-    let (Ok(node), Ok(bridge_dir), Ok(server)) = (
+    let Ok(codex_metadata) = std::fs::symlink_metadata(&codex) else {
+        return false;
+    };
+    if !codex_metadata.is_file() || codex_metadata.file_type().is_symlink() {
+        return false;
+    }
+    let (Ok(node), Ok(bridge_dir), Ok(server), Ok(codex)) = (
         node.canonicalize(),
         bridge_dir.canonicalize(),
         server.canonicalize(),
+        codex.canonicalize(),
     ) else {
         return false;
     };
     if server.parent() != Some(bridge_dir.as_path()) {
         return false;
+    }
+
+    let mut env = BTreeMap::new();
+    env.insert(
+        "CODEX_BIN".to_string(),
+        codex.to_string_lossy().into_owned(),
+    );
+    let mut provider_path_entries = Vec::new();
+    if let Some(parent) = node.parent() {
+        provider_path_entries.push(parent.to_path_buf());
+    }
+    #[cfg(unix)]
+    provider_path_entries.extend([
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/bin"),
+        PathBuf::from("/usr/sbin"),
+        PathBuf::from("/sbin"),
+    ]);
+    if let Ok(value) = std::env::join_paths(provider_path_entries) {
+        env.insert("PATH".to_string(), value.to_string_lossy().into_owned());
+    }
+    for key in ["HOME", "CODEX_HOME", "TMPDIR", "TMP", "TEMP"] {
+        if let Some(value) = std::env::var_os(key).filter(|value| !value.is_empty()) {
+            env.insert(key.to_string(), value.to_string_lossy().into_owned());
+        }
     }
 
     config.providers.push(McpGatewayProviderConfig {
@@ -1697,7 +1823,7 @@ fn inject_bundled_context_bridge(
         executable: node.to_string_lossy().into_owned(),
         args: vec![server.to_string_lossy().into_owned()],
         cwd: Some(bridge_dir.to_string_lossy().into_owned()),
-        env: BTreeMap::new(),
+        env,
         env_from_env: BTreeMap::new(),
         timeout_secs: Some(30),
     });
@@ -2339,25 +2465,28 @@ mod mcp_gateway_config_tests {
         })
     }
 
-    fn bundled_bridge_fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    fn bundled_bridge_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let node = tmp.path().join("node");
+        let codex = tmp.path().join("codex");
         let bridge_dir = tmp.path().join("codex-context-bridge");
         std::fs::write(&node, b"node").unwrap();
+        std::fs::write(&codex, b"codex").unwrap();
         std::fs::create_dir_all(&bridge_dir).unwrap();
         std::fs::write(bridge_dir.join("server.mjs"), b"// bridge").unwrap();
-        (tmp, node, bridge_dir)
+        (tmp, node, bridge_dir, codex)
     }
 
     #[test]
-    fn bundled_context_bridge_is_injected_without_mutating_user_config() {
-        let (_tmp, node, bridge_dir) = bundled_bridge_fixture();
+    fn bundled_context_bridge_is_injected_with_canonical_codex_reference() {
+        let (_tmp, node, bridge_dir, codex) = bundled_bridge_fixture();
         let mut config = McpGatewayConfig::default();
 
         assert!(inject_bundled_context_bridge(
             &mut config,
             Some(node.clone()),
             Some(bridge_dir.clone()),
+            Some(codex.clone()),
         ));
         assert_eq!(config.providers.len(), 1);
         let provider = &config.providers[0];
@@ -2380,7 +2509,15 @@ mod mcp_gateway_config_tests {
                 .to_string_lossy()
                 .into_owned()]
         );
-        assert!(provider.env.is_empty());
+        assert_eq!(
+            provider.env.get("CODEX_BIN").map(String::as_str),
+            Some(codex.canonicalize().unwrap().to_string_lossy().as_ref())
+        );
+        assert!(
+            provider.env.get("PATH").is_some_and(
+                |value| value.contains(node.parent().unwrap().to_string_lossy().as_ref())
+            )
+        );
         assert!(provider.env_from_env.is_empty());
         assert_eq!(provider.timeout_secs, Some(30));
         validate_mcp_gateway_config(&config).unwrap();
@@ -2388,7 +2525,7 @@ mod mcp_gateway_config_tests {
 
     #[test]
     fn explicit_codex_context_provider_wins_over_bundled_default() {
-        let (_tmp, node, bridge_dir) = bundled_bridge_fixture();
+        let (_tmp, node, bridge_dir, _codex) = bundled_bridge_fixture();
         let mut explicit = provider();
         explicit.id = BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID.to_string();
         explicit.name = "Operator Codex Context".to_string();
@@ -2402,6 +2539,7 @@ mod mcp_gateway_config_tests {
             &mut config,
             Some(node),
             Some(bridge_dir),
+            None,
         ));
         assert_eq!(config.providers, vec![expected]);
     }
@@ -2419,6 +2557,7 @@ mod mcp_gateway_config_tests {
             &mut config,
             Some(node),
             Some(bridge_dir),
+            Some(tmp.path().join("missing-codex")),
         ));
         assert!(config.providers.is_empty());
         validate_mcp_gateway_config(&config).unwrap();
@@ -2427,8 +2566,30 @@ mod mcp_gateway_config_tests {
             &mut config,
             Some(PathBuf::from("relative-node")),
             Some(PathBuf::from("relative-bridge")),
+            Some(PathBuf::from("relative-codex")),
         ));
         assert!(config.providers.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bundled_context_readiness_rejects_symlinked_bundle_assets_before_execution() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let node_target = tmp.path().join("node-target");
+        let node_link = tmp.path().join("node-link");
+        let bridge_real = tmp.path().join("bridge-real");
+        let bridge_link = tmp.path().join("bridge-link");
+        std::fs::write(&node_target, b"not executable and must never run").unwrap();
+        symlink(&node_target, &node_link).unwrap();
+        std::fs::create_dir_all(&bridge_real).unwrap();
+        std::fs::write(bridge_real.join("readiness.mjs"), b"must never run").unwrap();
+
+        assert!(bundled_context_readiness(&node_link, &bridge_real).is_none());
+
+        symlink(&bridge_real, &bridge_link).unwrap();
+        assert!(bundled_context_readiness(&node_target, &bridge_link).is_none());
     }
 
     #[test]

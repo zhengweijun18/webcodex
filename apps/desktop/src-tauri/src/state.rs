@@ -7,11 +7,11 @@ use crate::deadline::Deadline;
 use crate::error::{DesktopError, DesktopResult};
 use crate::models::{
     aggregate_readiness, ChatGptActivitySnapshot, DesktopOperationKind, DesktopStateSnapshot,
-    EnhancedRuntimeSnapshot, Enrollment, Experience, Exposure, ExposureReadiness, ProjectReadiness,
-    ProjectSelection, QuickShareState, ReadinessNextActionKind, ReadinessSummaryKind,
-    RegularConnectionPreference, RegularTunnelState, RegularTunnelStatus, RunnerReadiness,
-    RunnerTopology, RuntimeTopology, ServerReadiness, ServerTopology, StoredDesktopConfig,
-    StoredRuntime, TunnelProxyConfig, TunnelProxyMode, TunnelProxySnapshot,
+    Enrollment, Experience, Exposure, ExposureReadiness, ProjectReadiness, ProjectSelection,
+    QuickShareState, ReadinessNextActionKind, ReadinessSummaryKind, RegularConnectionPreference,
+    RegularTunnelState, RegularTunnelStatus, RunnerReadiness, RunnerTopology, RuntimeTopology,
+    ServerReadiness, ServerTopology, StoredDesktopConfig, StoredRuntime, TunnelProxyConfig,
+    TunnelProxyMode, TunnelProxySnapshot,
 };
 use crate::operation::{
     cancelled_error, CancellationContext, CancellationSignal, OperationAdmission,
@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -43,6 +43,7 @@ const QUICK_SHARE_READY_TIMEOUT: Duration = Duration::from_secs(90);
 const REGULAR_TUNNEL_READY_TIMEOUT: Duration = Duration::from_secs(90);
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const READINESS_CLEANUP_SLACK: Duration = Duration::from_secs(2);
+const ENHANCED_RUNTIME_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const SHUTDOWN_OPERATION_WAIT: Duration = Duration::from_secs(5);
 const DESKTOP_STATE_MAX_BYTES: u64 = 256 * 1024;
 const DESKTOP_SERVER_ENV_MAX_BYTES: u64 = 256 * 1024;
@@ -578,96 +579,10 @@ fn can_refresh_legacy_runner(snapshot: Option<crate::process::ProcessSnapshot>) 
     })
 }
 
-fn enhanced_runtime_snapshot(resource_dir: &Path) -> EnhancedRuntimeSnapshot {
-    let tools = resource_dir.join("webcodex-tools");
-    let bundled_node = tools.join("node").join("node");
-    let bridge = tools.join("codex-context-bridge");
-    let bundled_node_ready = regular_file(&bundled_node);
-    let bundled_context_bridge_ready = bridge.is_dir()
-        && [
-            "bridge-lib.mjs",
-            "package.json",
-            "server.mjs",
-            "self-check.mjs",
-        ]
-        .iter()
-        .all(|name| regular_file(&bridge.join(name)));
-    let native_codex_reference_available = codex_reference_available();
-    EnhancedRuntimeSnapshot {
-        bundled_node_ready,
-        bundled_context_bridge_ready,
-        native_codex_reference_available,
-        native_context_ready: bundled_node_ready
-            && bundled_context_bridge_ready
-            && native_codex_reference_available,
-    }
-}
-
-fn regular_file(path: &Path) -> bool {
-    std::fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
-}
-
-fn codex_reference_available() -> bool {
-    let mut candidates = Vec::new();
-    if let Some(value) = std::env::var_os("CODEX_BIN").filter(|value| !value.is_empty()) {
-        candidates.push(PathBuf::from(value));
-    }
-    if let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) {
-        candidates.push(PathBuf::from(&home).join(".local/bin/codex"));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        candidates.push(PathBuf::from("/usr/local/bin/codex"));
-        candidates.push(PathBuf::from("/opt/homebrew/bin/codex"));
-    }
-    if let Some(path) = std::env::var_os("PATH") {
-        for directory in std::env::split_paths(&path) {
-            candidates.push(directory.join(if cfg!(windows) { "codex.exe" } else { "codex" }));
-        }
-    }
-    candidates.into_iter().any(|path| regular_file(&path))
-}
-
-#[cfg(test)]
-mod enhanced_runtime_tests {
-    use super::*;
-
-    #[test]
-    fn enhanced_runtime_snapshot_requires_complete_bundled_tools() {
-        let temp = tempfile::tempdir().unwrap();
-        let tools = temp.path().join("webcodex-tools");
-        let node = tools.join("node").join("node");
-        let bridge = tools.join("codex-context-bridge");
-        std::fs::create_dir_all(node.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(&bridge).unwrap();
-        std::fs::write(&node, b"node").unwrap();
-        for name in [
-            "bridge-lib.mjs",
-            "package.json",
-            "server.mjs",
-            "self-check.mjs",
-        ] {
-            std::fs::write(bridge.join(name), b"fixture").unwrap();
-        }
-
-        let snapshot = enhanced_runtime_snapshot(temp.path());
-        assert!(snapshot.bundled_node_ready);
-        assert!(snapshot.bundled_context_bridge_ready);
-        assert_eq!(
-            snapshot.native_context_ready,
-            snapshot.native_codex_reference_available
-        );
-
-        std::fs::remove_file(bridge.join("server.mjs")).unwrap();
-        let incomplete = enhanced_runtime_snapshot(temp.path());
-        assert!(!incomplete.bundled_context_bridge_ready);
-        assert!(!incomplete.native_context_ready);
-    }
-}
-
 pub struct DesktopCore {
     data_dir: PathBuf,
+    resource_dir: PathBuf,
+    enhanced_runtime_observed_at: Instant,
     default_project_dir: PathBuf,
     config_path: PathBuf,
     config: StoredDesktopConfig,
@@ -705,12 +620,14 @@ impl DesktopCore {
         apply_openai_tunnel_configuration(&mut snapshot, &tunnel_config);
         snapshot.regular_tunnel_available = true;
         snapshot.powershell_runtime = crate::platform::powershell_runtime_snapshot();
-        snapshot.enhanced_runtime = Some(enhanced_runtime_snapshot(&resource_dir));
+        snapshot.enhanced_runtime = Some(crate::enhanced_runtime::snapshot(&resource_dir));
         apply_config_projection(&mut snapshot, &config);
         let published = Arc::new(RwLock::new(snapshot.clone()));
         let supervisor = Arc::new(Mutex::new(ProcessSupervisor::new(activity.clone())));
         Ok(Self {
             data_dir,
+            resource_dir: resource_dir.clone(),
+            enhanced_runtime_observed_at: Instant::now(),
             default_project_dir,
             config_path,
             config,
@@ -727,6 +644,11 @@ impl DesktopCore {
     }
 
     pub async fn get_state(&mut self) -> DesktopResult<DesktopStateSnapshot> {
+        if self.enhanced_runtime_observed_at.elapsed() >= ENHANCED_RUNTIME_REFRESH_INTERVAL {
+            self.snapshot.enhanced_runtime =
+                Some(crate::enhanced_runtime::snapshot(&self.resource_dir));
+            self.enhanced_runtime_observed_at = Instant::now();
+        }
         apply_openai_tunnel_configuration(&mut self.snapshot, &self.tunnel_config);
         self.snapshot.regular_tunnel_available = true;
         apply_config_projection(&mut self.snapshot, &self.config);

@@ -322,6 +322,26 @@ if payload.get("native_model_turns") != 0:
     raise SystemExit(f"bundled Context Bridge started a native model turn: {payload}")
 PY
 
+bridge_readiness="$("$bundled_node_in_app" "$bridge_dir_in_app/readiness.mjs" --json --timeout-ms 3000)"
+python3 - "$bridge_readiness" "$context_bridge_version" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+expected_version = sys.argv[2]
+if payload.get("status") not in {"ready", "degraded", "unavailable"}:
+    raise SystemExit(f"bundled Context Bridge readiness returned invalid status: {payload}")
+if payload.get("source_version") != expected_version:
+    raise SystemExit(
+        f"bundled Context Bridge readiness version mismatch: {payload.get('source_version')} != {expected_version}"
+    )
+if payload.get("native_model_turns") != 0:
+    raise SystemExit(f"bundled Context Bridge readiness started a native model turn: {payload}")
+for key in ("reason", "owner", "impact", "next_action", "observed_at_ms"):
+    if payload.get(key) in (None, ""):
+        raise SystemExit(f"bundled Context Bridge readiness missing {key}: {payload}")
+PY
+
 rustc_version="$(rustc --version)"
 cargo_version="$("$cargo_bin" --version)"
 node_version="$(node --version)"
@@ -339,7 +359,7 @@ if [ -f "$vue_tool_root/node_modules/typescript/package.json" ]; then
 fi
 
 provenance="$output_root/build-provenance.json"
-python3 - "$provenance" "$app" "$source_sha" "$version" "$built_at" "$platform" "$stage/desktop-bundle.json" "$extra_rustflags" "$rustc_version" "$cargo_version" "$node_version" "$npm_version" "$sdk_path" "$sdk_version" "$vue_version" "$typescript_version" "$bundled_node_version" "$context_bridge_version" <<'PY'
+python3 - "$provenance" "$app" "$source_sha" "$version" "$built_at" "$platform" "$stage/desktop-bundle.json" "$extra_rustflags" "$rustc_version" "$cargo_version" "$node_version" "$npm_version" "$sdk_path" "$sdk_version" "$vue_version" "$typescript_version" "$bundled_node_version" "$context_bridge_version" "$bridge_readiness" <<'PY'
 import hashlib
 import json
 import sys
@@ -349,8 +369,10 @@ from pathlib import Path
     out, app, source, version, built_at, platform, stage_metadata, rustflags,
     rustc_version, cargo_version, node_version, npm_version, sdk_path,
     sdk_version, vue_version, typescript_version, bundled_node_version,
-    context_bridge_version,
+    context_bridge_version, bridge_readiness,
 ) = sys.argv[1:]
+
+readiness = json.loads(bridge_readiness)
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -396,7 +418,23 @@ payload = {
             "version": context_bridge_version,
             "server_sha256": sha256(tools / "codex-context-bridge/server.mjs"),
             "bridge_lib_sha256": sha256(tools / "codex-context-bridge/bridge-lib.mjs"),
+            "readiness_sha256": sha256(tools / "codex-context-bridge/readiness.mjs"),
             "self_check_sha256": sha256(tools / "codex-context-bridge/self-check.mjs"),
+            "readiness_probe": {
+                key: readiness.get(key)
+                for key in (
+                    "status",
+                    "reason",
+                    "owner",
+                    "impact",
+                    "next_action",
+                    "observed_at_ms",
+                    "source_version",
+                    "native_model_turns",
+                    "requested_was_symlink",
+                    "provider_mcp_probe",
+                )
+            },
         },
     },
 }

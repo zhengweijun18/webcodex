@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { probeCodexReadiness, resolveCodexExecutable } from "./readiness.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 
@@ -101,6 +102,7 @@ async function main() {
     const project = path.join(temp, "project");
     const outside = path.join(temp, "outside.txt");
     const codexHome = path.join(temp, "codex-home");
+    const fakeCodexTarget = path.join(temp, "fake-codex-target");
     const fakeCodex = path.join(temp, "fake-codex");
     const log = path.join(temp, "fake.log");
     fs.mkdirSync(path.join(project, ".skills", "demo"), { recursive: true });
@@ -115,20 +117,37 @@ async function main() {
       profile: "fixture",
       knowledge_paths: { docs: "docs/README.md", escape: "linked.txt" }
     }));
-    fs.writeFileSync(fakeCodex, '#!/bin/sh\nexec "$FAKE_NODE" "$FAKE_SELF_CHECK" --fake-app-server "$@"\n');
-    fs.chmodSync(fakeCodex, 0o755);
+    fs.writeFileSync(
+      fakeCodexTarget,
+      [
+        "#!/bin/sh",
+        "export WEBCODEX_PROJECT_ROOT=" + JSON.stringify(project),
+        "export FAKE_LOG=" + JSON.stringify(log),
+        "exec " + JSON.stringify(process.execPath) + " " + JSON.stringify(SELF) + ' --fake-app-server "$@"',
+        ""
+      ].join("\n")
+    );
+    fs.chmodSync(fakeCodexTarget, 0o755);
+    fs.symlinkSync(fakeCodexTarget, fakeCodex);
 
     const baseEnv = {
       ...process.env,
       CODEX_BIN: fakeCodex,
       CODEX_HOME: codexHome,
       WEBCODEX_PROJECT_ROOT: project,
-      FAKE_NODE: process.execPath,
-      FAKE_SELF_CHECK: SELF,
       FAKE_LOG: log
     };
+    const resolved = resolveCodexExecutable({ env: baseEnv });
+    assert.equal(resolved.status, "ready");
+    assert.equal(resolved.canonical_path, fs.realpathSync(fakeCodexTarget));
+    assert.equal(resolved.requested_was_symlink, true);
+    const invalid = resolveCodexExecutable({
+      env: { ...baseEnv, CODEX_BIN: path.join(temp, "missing-codex") }
+    });
+    assert.equal(invalid.status, "unavailable");
+    assert.equal(invalid.reason, "codex_reference_invalid");
     const first = runChild(baseEnv);
-    assert.equal(first.bridge_version, "0.5.0");
+    assert.equal(first.bridge_version, "0.5.1");
     assert.equal(first.stale, false);
     assert.match(first.fingerprint, /^sha256:[a-f0-9]{64}$/);
     const escape = first.knowledge.entries.find(entry => entry.key === "escape");
@@ -150,11 +169,21 @@ async function main() {
     assert.equal(methods.filter(line => line.startsWith("start:")).length, 2);
     assert.equal(methods.filter(line => line === "method:initialized").length, 2);
 
+    const readiness = await probeCodexReadiness({ env: baseEnv, timeoutMs: 3000 });
+    assert.equal(readiness.status, "ready", JSON.stringify(readiness));
+    assert.equal(readiness.native_model_turns, 0);
+    assert.equal(readiness.requested_was_symlink, true);
+    assert.equal(readiness.provider_mcp_probe, true);
+    assert.equal(readiness.owner, "codex_context_provider");
+
     process.stdout.write(JSON.stringify({
       status: "pass",
       bridge_version: first.bridge_version,
       single_process_per_bootstrap: true,
       initialized_notification: true,
+      codex_symlink_canonicalized: true,
+      explicit_invalid_codex_fails_closed: true,
+      provider_mcp_probe: true,
       skill_body_changes_fingerprint: true,
       symlink_metadata_escape_blocked: true,
       native_model_turns: 0

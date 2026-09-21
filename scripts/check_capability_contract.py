@@ -171,6 +171,80 @@ def probe(root: Path, capability: str, zero_quota_state: Path | None) -> tuple[b
             ),
         )
         return ok, data
+    if capability == "truthful_single_install_readiness":
+        bridge_ok, bridge_data = contains_any(
+            root,
+            (
+                (
+                    "tooling/tools/codex-context-bridge/readiness.mjs",
+                    (
+                        "resolveCodexExecutable",
+                        "probeCodexReadiness",
+                        "probeBundledProvider",
+                        "provider_mcp_probe",
+                        "native_model_turns",
+                        "realpathSync",
+                    ),
+                ),
+            ),
+        )
+        runner_ok, runner_data = contains_any(
+            root,
+            (
+                (
+                    "crates/webcodex-runner/src/webcodex_runner/config.rs",
+                    (
+                        "bundled_context_readiness",
+                        "BUNDLED_CONTEXT_READINESS_TIMEOUT_MS",
+                        "\"CODEX_BIN\"",
+                    ),
+                ),
+            ),
+        )
+        desktop_projection_ok, desktop_projection_data = contains_any(
+            root,
+            (
+                (
+                    "apps/desktop/src-tauri/src/enhanced_runtime.rs",
+                    (
+                        "native_probe",
+                        "vue_toolchain_external_ready",
+                        "native_model_turns",
+                    ),
+                ),
+            ),
+        )
+        desktop_refresh_ok, desktop_refresh_data = contains_any(
+            root,
+            (
+                (
+                    "apps/desktop/src-tauri/src/state.rs",
+                    ("ENHANCED_RUNTIME_REFRESH_INTERVAL", "enhanced_runtime_observed_at"),
+                ),
+            ),
+        )
+        ui_ok, ui_data = contains_any(
+            root,
+            (
+                (
+                    "apps/desktop/src/features/workspace/WorkspaceStatus.tsx",
+                    ("native_context", "vue_lsp", "readinessDetail"),
+                ),
+            ),
+        )
+        return (
+            bridge_ok
+            and runner_ok
+            and desktop_projection_ok
+            and desktop_refresh_ok
+            and ui_ok
+        ), {
+            "shared_bridge_probe": bridge_data,
+            "runner_injection": runner_data,
+            "desktop_projection": desktop_projection_data,
+            "desktop_refresh": desktop_refresh_data,
+            "user_visible_status": ui_data,
+        }
     if capability == "zero_quota_native_context_orchestration":
         runtime_ok, runtime_data = contains_any(
             root,

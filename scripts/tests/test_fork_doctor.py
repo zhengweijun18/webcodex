@@ -104,9 +104,9 @@ class ForkDoctorEvolutionTests(unittest.TestCase):
             node.parent.mkdir(parents=True)
             bridge.mkdir(parents=True)
             node.write_text("node")
-            for name in ("bridge-lib.mjs", "server.mjs", "self-check.mjs"):
+            for name in ("bridge-lib.mjs", "readiness.mjs", "server.mjs", "self-check.mjs"):
                 (bridge / name).write_text("fixture")
-            (bridge / "package.json").write_text(json.dumps({"version": "0.5.0"}))
+            (bridge / "package.json").write_text(json.dumps({"version": "0.5.1"}))
             completed = [
                 subprocess.CompletedProcess(
                     args=[str(node), "--version"],
@@ -120,7 +120,24 @@ class ForkDoctorEvolutionTests(unittest.TestCase):
                     stdout=json.dumps(
                         {
                             "status": "pass",
-                            "bridge_version": "0.5.0",
+                            "bridge_version": "0.5.1",
+                            "native_model_turns": 0,
+                        }
+                    ),
+                    stderr="",
+                ),
+                subprocess.CompletedProcess(
+                    args=[str(node), str(bridge / "readiness.mjs")],
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "status": "ready",
+                            "reason": "native_context_ready",
+                            "owner": "codex_reference",
+                            "impact": "native_context_only",
+                            "next_action": "none",
+                            "observed_at_ms": 1,
+                            "source_version": "0.5.1",
                             "native_model_turns": 0,
                         }
                     ),
@@ -134,6 +151,63 @@ class ForkDoctorEvolutionTests(unittest.TestCase):
         self.assertIn("bundled Node + Context Bridge", detail)
         self.assertEqual(data["bundled_node_version"], "v24.21.0")
         self.assertEqual(data["native_model_turns"], 0)
+        self.assertEqual(data["native_context_status"], "ready")
+
+    def test_installed_enhanced_runtime_warns_when_native_context_is_degraded(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td) / "WebCodex Desktop.app"
+            tools = app / "Contents/Resources/webcodex-tools"
+            node = tools / "node/node"
+            bridge = tools / "codex-context-bridge"
+            node.parent.mkdir(parents=True)
+            bridge.mkdir(parents=True)
+            node.write_text("node")
+            for name in ("bridge-lib.mjs", "readiness.mjs", "server.mjs", "self-check.mjs"):
+                (bridge / name).write_text("fixture")
+            (bridge / "package.json").write_text(json.dumps({"version": "0.5.1"}))
+            completed = [
+                subprocess.CompletedProcess(
+                    args=[str(node), "--version"],
+                    returncode=0,
+                    stdout="v24.21.0\n",
+                    stderr="",
+                ),
+                subprocess.CompletedProcess(
+                    args=[str(node), str(bridge / "self-check.mjs")],
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "status": "pass",
+                            "bridge_version": "0.5.1",
+                            "native_model_turns": 0,
+                        }
+                    ),
+                    stderr="",
+                ),
+                subprocess.CompletedProcess(
+                    args=[str(node), str(bridge / "readiness.mjs")],
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "status": "degraded",
+                            "reason": "codex_app_server_timeout",
+                            "owner": "codex_reference",
+                            "impact": "native_context_only",
+                            "next_action": "retry_native_context",
+                            "observed_at_ms": 1,
+                            "source_version": "0.5.1",
+                            "native_model_turns": 0,
+                        }
+                    ),
+                    stderr="",
+                ),
+            ]
+            with mock.patch.object(doctor.platform, "system", return_value="Darwin"), \
+                 mock.patch.object(doctor, "run", side_effect=completed):
+                status, detail, data = doctor.check_installed_enhanced_runtime(ROOT, app)
+        self.assertEqual(status, "warning")
+        self.assertIn("Native Context is not currently ready", detail)
+        self.assertEqual(data["native_context_reason"], "codex_app_server_timeout")
 
     def test_installed_enhanced_runtime_warns_when_bundle_resources_are_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td, \

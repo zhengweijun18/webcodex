@@ -102,11 +102,21 @@ export interface BinaryInfo {
   source: string;
 }
 
+export interface EnhancedRuntimeComponentSnapshot {
+  status: "ready" | "degraded" | "unavailable";
+  reason: string;
+  owner: string;
+  impact: string;
+  next_action: string;
+  observed_at_ms: number;
+  source_version: string;
+}
+
 export interface EnhancedRuntimeSnapshot {
-  bundled_node_ready: boolean;
-  bundled_context_bridge_ready: boolean;
-  native_codex_reference_available: boolean;
-  native_context_ready: boolean;
+  bundled_node: EnhancedRuntimeComponentSnapshot;
+  bundled_context_bridge: EnhancedRuntimeComponentSnapshot;
+  native_context: EnhancedRuntimeComponentSnapshot;
+  vue_lsp: EnhancedRuntimeComponentSnapshot;
 }
 
 export interface QuickShareState {

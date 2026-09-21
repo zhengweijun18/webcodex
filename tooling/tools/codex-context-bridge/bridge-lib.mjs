@@ -4,28 +4,24 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
+import {
+  BRIDGE_VERSION,
+  codexChildEnvironment,
+  resolveCodexExecutable
+} from "./readiness.mjs";
 
-export const BRIDGE_VERSION = "0.5.0";
+export { BRIDGE_VERSION };
 export const DEFAULT_PROJECT_ROOT = process.env.WEBCODEX_PROJECT_ROOT || process.cwd();
 export const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+export const CODEX_RESOLUTION = resolveCodexExecutable();
+export const CODEX_BIN = CODEX_RESOLUTION.canonical_path || null;
 
-function resolveCodexBin() {
-  const candidates = [
-    process.env.CODEX_BIN,
-    path.join(os.homedir(), ".local", "bin", "codex"),
-    "/usr/local/bin/codex",
-    "/opt/homebrew/bin/codex"
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch {}
+function requireCodexBin() {
+  if (!CODEX_BIN) {
+    throw new Error(CODEX_RESOLUTION.reason || "codex_reference_missing");
   }
-  return "codex";
+  return CODEX_BIN;
 }
-
-export const CODEX_BIN = resolveCodexBin();
 
 const MAX_TEXT_BYTES = 128 * 1024;
 const TRUSTED_HOOK_STATUSES = new Set(["trusted", "managed"]);
@@ -69,9 +65,10 @@ function rpcTimeout(ms, message) {
 }
 
 export async function codexRpc(method, params, { timeoutMs = 12000 } = {}) {
-  const child = spawn(CODEX_BIN, ["app-server", "--stdio"], {
+  const codexBin = requireCodexBin();
+  const child = spawn(codexBin, ["app-server", "--stdio"], {
     cwd: DEFAULT_PROJECT_ROOT,
-    env: process.env,
+    env: codexChildEnvironment(codexBin),
     stdio: ["pipe", "pipe", "pipe"]
   });
   let stderr = "";
@@ -116,9 +113,10 @@ export async function codexRpc(method, params, { timeoutMs = 12000 } = {}) {
 
 async function withCodexAppServer(projectRoot, callback, { timeoutMs = 60000 } = {}) {
   const root = ensureProjectRoot(projectRoot);
-  const child = spawn(CODEX_BIN, ["app-server", "--stdio"], {
+  const codexBin = requireCodexBin();
+  const child = spawn(codexBin, ["app-server", "--stdio"], {
     cwd: root,
-    env: process.env,
+    env: codexChildEnvironment(codexBin),
     stdio: ["pipe", "pipe", "pipe"]
   });
   let stderr = "";
