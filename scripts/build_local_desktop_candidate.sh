@@ -87,8 +87,14 @@ if [ "$machine" = "x86_64" ] && [ -n "$sdk" ]; then
     needs_overlay=1
   fi
   core_tbd="$sdk/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics.tbd"
-  if [ -f "$core_tbd" ] && ! grep -q '_CGPreflightScreenCaptureAccess' "$core_tbd"; then
-    needs_overlay=1
+  if [ -f "$core_tbd" ]; then
+    for symbol in +      _CGPreflightPostEventAccess +      _CGPreflightScreenCaptureAccess +      _CGRequestScreenCaptureAccess
+    do
+      if ! grep -q "$symbol" "$core_tbd"; then
+        needs_overlay=1
+        break
+      fi
+    done
   fi
   if [ "$needs_overlay" -eq 1 ]; then
     mkdir -p "$overlay/AVFAudio.framework" "$overlay/CoreGraphics.framework"
@@ -114,7 +120,11 @@ path = Path(sys.argv[1])
 text = path.read_text()
 missing = [
     symbol
-    for symbol in ("_CGPreflightPostEventAccess", "_CGPreflightScreenCaptureAccess")
+    for symbol in (
+        "_CGPreflightPostEventAccess",
+        "_CGPreflightScreenCaptureAccess",
+        "_CGRequestScreenCaptureAccess",
+    )
     if symbol not in text
 ]
 if missing:
