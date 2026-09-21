@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -97,6 +98,29 @@ def desktop_process_status() -> dict[str, bool]:
     }
 
 
+def desktop_bundle_processes(app: Path = DEFAULT_APP) -> list[dict[str, object]]:
+    """Return only processes whose executable command lives in this exact app bundle."""
+    result = run(["ps", "-axo", "pid=,ppid=,command="], check=False)
+    if result.returncode != 0:
+        return []
+    prefix = f"{app}/Contents/"
+    rows = []
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(maxsplit=2)
+        if len(fields) != 3:
+            continue
+        pid_text, ppid_text, command = fields
+        if not command.startswith(prefix):
+            continue
+        try:
+            pid = int(pid_text)
+            ppid = int(ppid_text)
+        except ValueError:
+            continue
+        rows.append({"pid": pid, "ppid": ppid, "command": command})
+    return rows
+
+
 def desktop_running() -> bool:
     return any(desktop_process_status().values())
 
@@ -116,6 +140,22 @@ def wait_for_desktop_stopped(timeout: float) -> bool:
             return True
         time.sleep(0.25)
     return not desktop_running()
+
+
+def terminate_desktop_bundle_processes(app: Path = DEFAULT_APP) -> list[int]:
+    """Send SIGTERM only to processes executing from the exact installed app bundle."""
+    rows = desktop_bundle_processes(app)
+    signaled = []
+    # Children first makes stdin/pipe teardown less likely to leave a helper
+    # briefly alive after the GUI exits.
+    for row in sorted(rows, key=lambda item: int(item["pid"]), reverse=True):
+        pid = int(row["pid"])
+        try:
+            os.kill(pid, signal.SIGTERM)
+            signaled.append(pid)
+        except ProcessLookupError:
+            continue
+    return signaled
 
 
 @contextmanager
@@ -590,12 +630,23 @@ def request_desktop_quit() -> None:
         raise RuntimeError(f"failed to request Desktop quit: {quit_result.stderr.strip()}")
 
 
-def stop_desktop_for_transaction(timeout: float) -> None:
+def stop_desktop_for_transaction(timeout: float, app: Path = DEFAULT_APP) -> None:
     if not desktop_running():
         return
+    deadline = time.monotonic() + timeout
     request_desktop_quit()
-    if not wait_for_desktop_stopped(timeout):
-        raise RuntimeError("Desktop did not stop before transaction timeout")
+    graceful_wait = min(5.0, max(0.25, timeout / 2.0))
+    if wait_for_desktop_stopped(graceful_wait):
+        return
+    signaled = terminate_desktop_bundle_processes(app)
+    remaining = max(0.0, deadline - time.monotonic())
+    if remaining > 0 and wait_for_desktop_stopped(remaining):
+        return
+    residual = [int(row["pid"]) for row in desktop_bundle_processes(app)]
+    raise RuntimeError(
+        "Desktop did not stop before transaction timeout "
+        f"(sigterm_pids={signaled}, residual_pids={residual})"
+    )
 
 
 def auto_rollback_adoption(
@@ -611,7 +662,7 @@ def auto_rollback_adoption(
     restore_health = None
     backup_path = Path(backup) if backup else None
     if desktop_running():
-        stop_desktop_for_transaction(args.quit_timeout)
+        stop_desktop_for_transaction(args.quit_timeout, args.app)
     if previous is not None and backup_path is not None:
         source = verify_app(backup_path)
         if not same_identity(source, previous):
@@ -710,7 +761,7 @@ def command_adopt(args: argparse.Namespace) -> int:
         ):
             prior_last_known_good = previous
         if was_running:
-            stop_desktop_for_transaction(args.quit_timeout)
+            stop_desktop_for_transaction(args.quit_timeout, args.app)
         result = perform_install(args, candidate, previous, "adopt", record=False)
         write_release_state(
             args.state_root,

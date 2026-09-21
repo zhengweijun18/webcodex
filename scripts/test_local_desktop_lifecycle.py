@@ -51,6 +51,61 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(status, {"desktop": True, "runner": True, "server": True})
         process_run.assert_called_once_with(["ps", "-axo", "command="], check=False)
 
+    def test_desktop_bundle_processes_match_only_exact_installed_bundle(self) -> None:
+        app = Path("/Applications/WebCodex Desktop.app")
+        process_table = "\n".join(
+            [
+                "101 1 /Applications/WebCodex Desktop.app/Contents/MacOS/WebCodex",
+                "102 101 /Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex-runner --config /tmp/runner.toml",
+                "103 101 /Applications/WebCodex Desktop.app/Contents/Resources/webcodex-runtime/webcodex server tunnel",
+                "201 1 /Applications/WebCodex Desktop Backup.app/Contents/MacOS/WebCodex",
+                "202 1 /tmp/WebCodex Desktop.app/Contents/MacOS/WebCodex",
+            ]
+        )
+        with mock.patch.object(
+            lifecycle,
+            "run",
+            return_value=mock.Mock(returncode=0, stdout=process_table, stderr=""),
+        ):
+            rows = lifecycle.desktop_bundle_processes(app)
+        self.assertEqual([row["pid"] for row in rows], [101, 102, 103])
+
+    def test_terminate_desktop_bundle_processes_uses_sigterm_only_for_exact_pids(self) -> None:
+        rows = [
+            {"pid": 101, "ppid": 1, "command": "desktop"},
+            {"pid": 102, "ppid": 101, "command": "runner"},
+        ]
+        with mock.patch.object(
+            lifecycle, "desktop_bundle_processes", return_value=rows
+        ), mock.patch.object(lifecycle.os, "kill") as kill:
+            signaled = lifecycle.terminate_desktop_bundle_processes()
+        self.assertEqual(signaled, [102, 101])
+        self.assertEqual(
+            kill.call_args_list,
+            [
+                mock.call(102, lifecycle.signal.SIGTERM),
+                mock.call(101, lifecycle.signal.SIGTERM),
+            ],
+        )
+
+    def test_stop_desktop_for_transaction_falls_back_to_scoped_sigterm(self) -> None:
+        with mock.patch.object(
+            lifecycle, "desktop_running", return_value=True
+        ), mock.patch.object(
+            lifecycle, "request_desktop_quit"
+        ) as request_quit, mock.patch.object(
+            lifecycle, "wait_for_desktop_stopped", side_effect=[False, True]
+        ) as wait_stopped, mock.patch.object(
+            lifecycle, "terminate_desktop_bundle_processes", return_value=[102, 101]
+        ) as terminate:
+            lifecycle.stop_desktop_for_transaction(
+                40.0, Path("/Applications/WebCodex Desktop.app")
+            )
+        request_quit.assert_called_once_with()
+        self.assertEqual(wait_stopped.call_args_list[0], mock.call(5.0))
+        terminate.assert_called_once_with(Path("/Applications/WebCodex Desktop.app"))
+        self.assertEqual(wait_stopped.call_count, 2)
+
     def test_success_release_state_promotes_candidate_to_last_known_good(self) -> None:
         candidate = identity("new")
         previous = identity("old")
