@@ -14,6 +14,7 @@ else
   echo "cargo not found; set CARGO or install it under PATH/~/.cargo/bin" >&2
   exit 127
 fi
+export PATH="$(dirname "$cargo_bin"):$PATH"
 
 reuse_runtime=0
 output_root="$root/target/local-fork-desktop"
