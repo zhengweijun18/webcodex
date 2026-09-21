@@ -11,9 +11,9 @@ Ask your assistant to inspect a repository, modify code, run tests, use Git, or 
 > **What this fork is for:** make **ChatGPT + WebCodex** behave more like a reliable local coding agent — with project awareness, durable jobs, recoverable workflows, safer real-world effects, native Vue LSP, self-maintaining fork logic, and safe Desktop upgrades — while keeping **Native Codex model usage at zero**.
 
 Enhanced implementation branch: [`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)
-Current validated baseline: `3082590b87de6f023d775c98f8a082df6b4168c4`
+Current validated baseline: `6a3f3ea49e9f34f5919ae69d8f33afd7e76f7c15`
 
-### 14 core capabilities
+### 15 core capabilities
 
 1. **ChatGPT works on the real local project** — read/search/edit files, inspect Git/diffs, run tests/builds/formatters, use the real local toolchain, and finish work instead of only suggesting code.
 2. **Automatic project understanding** — before work starts, WebCodex can project root and nested `AGENTS.md`, available Skills, Knowledge, Hooks/runtime context, workspace state, and Workflow context so the model does not need the project explained from scratch every time.
@@ -29,6 +29,7 @@ Current validated baseline: `3082590b87de6f023d775c98f8a082df6b4168c4`
 12. **Disposable upstream upgrade rehearsal** — upstream changes are rehearsed in temporary worktrees first, so merge/rebase compatibility and capability behavior can be tested without rewriting the real maintenance branch.
 13. **Built-in Doctor health check** — source, installed Desktop, running Server/Runner, rollback backup, Vue toolchain, Zero-Quota evidence, Context Bridge, upstream state, and deployment alignment can be checked mechanically.
 14. **Reproducible Desktop provenance** — every formal Desktop candidate can be traced to the exact source commit, build time, toolchain, runtime binary hashes, codesign result, and dirty/clean state.
+15. **Single-install enhanced runtime** — the macOS Desktop bundle now carries a pinned official Node runtime plus Context Bridge 0.5.0; Desktop-owned Runner registration injects the bundled `codex_context` provider when the user has not explicitly configured one, so ordinary recipients no longer install Node, copy the Bridge, or edit `runner.toml` by hand.
 
 ### What using it feels like
 
@@ -68,6 +69,7 @@ The practical difference is that you do **not** need to repeatedly paste the pro
 | Self-maintaining fork | Local patches can retire once upstream proves equivalent behavior |
 | Doctor | One command checks source/runtime/deployment/toolchain/rollback/Zero-Quota health |
 | Reproducible provenance | A Desktop `.app` can be traced back to an exact source SHA and toolchain |
+| Single-install enhanced runtime | Install the Desktop app once; bundled Node + Context Bridge are registered automatically without hand-editing Runner config |
 
 ### What is already validated
 
@@ -78,8 +80,10 @@ The practical difference is that you do **not** need to repeatedly paste the pro
 - **Required capability contract:** 12/12 PASS
 - **Desktop lifecycle regression:** 17/17 PASS
 - **Upstream compatibility rehearsal:** PASS
+- **Bundled Node / Context Bridge:** `v24.21.0` / `0.5.0`, installed-app self-check PASS
+- **Single-install provider registration:** PASS; no manual Node install / Bridge copy / `runner.toml` edit required for the Desktop-owned Runner
 - **Observed Native Codex model turns:** **0**
-- **Source HEAD = installed Desktop = running Server/Runner:** aligned on `3082590b87de`
+- **Source HEAD = installed Desktop = running Server/Runner:** aligned on `6a3f3ea49e9f`
 
 ### Important boundary: what this does *not* claim
 
@@ -87,7 +91,7 @@ This fork does **not** claim to copy OpenAI's private Codex Host, Codex model re
 
 ### Handoff package
 
-- [Download `WebCodex-Zero-Quota-3082590b-macOS-Intel.zip`](deliverables/WebCodex-Zero-Quota-3082590b-macOS-Intel.zip)
+- [Download `WebCodex-Zero-Quota-6a3f3ea4-macOS-Intel.zip`](deliverables/WebCodex-Zero-Quota-6a3f3ea4-macOS-Intel.zip)
 - [Package notes + SHA256](deliverables/README.md)
 
 **In one sentence:** this fork makes ChatGPT + WebCodex a dependable local development agent that **understands the project, can really execute work, survives long tasks and reconnects, avoids unsafe blind retries, upgrades itself safely, and remains maintainable as upstream evolves — without using Native Codex model quota.**

@@ -16,31 +16,34 @@ Its main goal is **not simply “Zero-Quota”**. The package brings together th
 - **Self-maintaining fork** — upstream compatibility is rehearsed in disposable worktrees, and local patches can retire only after behavioral verification proves upstream has really replaced them.
 - **Doctor + reproducible provenance** — source, installed Desktop, running Server/Runner, rollback state, toolchain, Zero-Quota evidence, runtime hashes, codesign, and source SHA can be checked mechanically.
 - **Zero-Quota Native Context** — observable Codex Runtime context such as Skills, scoped instructions, Hooks, and Knowledge can be used without starting a Native Codex model turn or silently falling back to a Codex agent.
+- **Single-install enhanced runtime** — the macOS Desktop now bundles official Node `v24.21.0` plus Context Bridge `0.5.0`; the Desktop-owned Runner injects the bundled `codex_context` provider when no explicit user provider exists, so normal recipients do not install Node, copy the Bridge, or edit `runner.toml`.
 
 In short, this package is about **project understanding, real execution, durable work, recovery, safer effects, native code intelligence, safe upgrades, and long-term maintainability** — with Zero-Quota as an important part of that larger goal.
 
 ## Current validated baseline
 
 - Branch: `vue-lsp-native-main`
-- Commit: `3082590b87de6f023d775c98f8a082df6b4168c4`
+- Commit: `6a3f3ea49e9f34f5919ae69d8f33afd7e76f7c15`
 - Desktop: `0.4.1`
 - Platform: macOS Intel / `darwin-x64`
+- Bundled Node: `v24.21.0`
 - Context Bridge: `0.5.0`
+- Single-install Desktop provider registration: validated
 - Native Codex model turns observed by packaged verification: `0`
 
 The packaged verification also covers Native Context behavior, scoped project instructions, Workflow continuity, capability contracts, Desktop lifecycle regression, upstream compatibility, and patch-retirement behavior.
 
 ## Package
 
-`WebCodex-Zero-Quota-3082590b-macOS-Intel.zip`
+`WebCodex-Zero-Quota-6a3f3ea4-macOS-Intel.zip`
 
-The filename keeps the historical `Zero-Quota` label so existing shared links remain stable, but the actual package scope is the full **Enhanced Runtime** described above.
+The filename keeps the historical `Zero-Quota` label for continuity, but the actual package scope is the full **Enhanced Runtime** described above. This release is single-install for ordinary macOS Desktop recipients.
 
 The ZIP contains:
 
-- installable `WebCodex Desktop.app`
-- exact source snapshot for `3082590b`
-- Context Bridge 0.5.0
+- installable `WebCodex Desktop.app` with bundled Node + Context Bridge
+- exact source snapshot for `6a3f3ea4`
+- Context Bridge 0.5.0 audit/advanced copy
 - machine-readable verification reports
 - build provenance and checksums
 - the plain-language capability overview

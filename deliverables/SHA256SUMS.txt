@@ -1,1 +1,1 @@
-1d9fa0132e46637181978bab778973a32b71f0a76109468196717de9ee6c0677  /Users/zhengweijun/Work/2026Q2/webcodex-local-fork/deliverables/WebCodex-Zero-Quota-3082590b-macOS-Intel.zip
+24f7aafca16f96bb573d74d8f4bad9ddfbd7c2884f039426258cac9d71da3c7a  WebCodex-Zero-Quota-6a3f3ea4-macOS-Intel.zip

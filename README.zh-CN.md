@@ -11,9 +11,9 @@
 > **一句话先说清楚：**这套 Fork 是为了让 **ChatGPT + WebCodex 更像一个可靠的本地开发 Agent**——它能自动理解项目、真正操作本机代码、跑长任务、断线后继续、安全处理真实副作用、使用 Vue LSP、自己判断补丁何时可以退休，还能安全升级 Desktop；同时 **Native Codex 模型调用保持为 0**。
 
 增强实现分支：[`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)
-当前已验证基线：`3082590b87de6f023d775c98f8a082df6b4168c4`
+当前已验证基线：`6a3f3ea49e9f34f5919ae69d8f33afd7e76f7c15`
 
-### 14 个核心功能点
+### 15 个核心功能点
 
 1. **ChatGPT 直接操作本机真实项目**：读取、搜索、修改代码，看 Git/Diff，运行编译、测试、格式化和项目自己的工具链，不只是给建议，而是可以真正把任务做完。
 2. **自动理解项目规则、AGENTS、Skill、Knowledge**：AI 开工前自动获得根目录和子目录 `AGENTS.md`、可用 Skill、Knowledge、Hook/Runtime Context、当前工作区和 Workflow 状态，不需要每次从头解释“这个项目怎么玩”。
@@ -29,6 +29,7 @@
 12. **Upstream 升级先在临时 worktree 演习**：先在 disposable worktree 里测试 rebase/merge、编译和能力行为，不直接改真实维护分支，避免一次上游升级把正在用的分支弄乱。
 13. **自带 Doctor 健康检查**：可以机器化检查源码、已安装 Desktop、正在运行的 Server/Runner、rollback backup、Vue 工具链、Zero-Quota evidence、Context Bridge、upstream 状态和 deployment alignment。
 14. **Desktop 构建可追溯到精确源码和工具链**：每个正式候选都能回答“它到底由哪个 commit 编出来、是不是 dirty build、Rust/Node/Vue 工具链是什么、三个 runtime binary 是不是同一版本、SHA256 是什么”。
+15. **增强 Runtime 变成 Single-Install**：macOS Desktop 现在直接内置固定版官方 Node 与 Context Bridge 0.5.0；Desktop-owned Runner 在用户没有显式同名配置时自动注册 bundled `codex_context`，普通接收方只装 Desktop，不再手工装 Node、复制 Bridge 或修改 `runner.toml`。
 
 ### 你实际使用时，大概是什么体验
 
@@ -68,10 +69,11 @@ build / test 等长任务交给 Job 持续运行
 | Self-Maintaining Fork | 上游实现同等能力后，本地 patch 可以有证据地退休 |
 | Doctor | 一条检查判断源码、运行版、工具链、rollback、Zero-Quota 是否健康 |
 | 可追溯构建 | `.app` 可以追溯到精确源码 SHA 和工具链 |
+| Single-Install Enhanced Runtime | 只安装 Desktop；Node + Context Bridge 随 App 打包并自动注册，不需要手改 Runner 配置 |
 
 ### 当前已经真实验证过什么
 
-当前 `3082590b` 基线不是“文档说支持”，而是有机器验证证据：
+当前 `6a3f3ea4` 基线不是“文档说支持”，而是有机器验证证据：
 
 - **Context Bridge black-box：PASS**
 - **Native Context runtime：8/8 PASS**
@@ -80,8 +82,10 @@ build / test 等长任务交给 Job 持续运行
 - **Required Capability Contract：12/12 PASS**
 - **Desktop lifecycle regression：17/17 PASS**
 - **Upstream compatibility rehearsal：PASS**
+- **Bundled Node / Context Bridge：`v24.21.0` / `0.5.0`，实际安装版 self-check PASS**
+- **Single-Install Provider 自动注册：PASS**；普通 Desktop 用户不需要手工装 Node、复制 Bridge、修改 `runner.toml`
 - **Native Codex model turns：0**
-- **Source HEAD = Installed Desktop = Running Server/Runner：全部对齐到 `3082590b87de`**
+- **Source HEAD = Installed Desktop = Running Server/Runner：全部对齐到 `6a3f3ea49e9f`**
 
 ### 哪些能力明确不属于这个 Goal
 
@@ -93,10 +97,10 @@ build / test 等长任务交给 Job 持续运行
 
 ### 完整交接包
 
-- [下载 `WebCodex-Zero-Quota-3082590b-macOS-Intel.zip`](deliverables/WebCodex-Zero-Quota-3082590b-macOS-Intel.zip)
+- [下载 `WebCodex-Zero-Quota-6a3f3ea4-macOS-Intel.zip`](deliverables/WebCodex-Zero-Quota-6a3f3ea4-macOS-Intel.zip)
 - [交接包说明与 SHA256](deliverables/README.md)
 
-交接包里包含：可安装 Desktop、精确源码快照、Zero-Quota Context Bridge、机器验证报告、校验和，以及更详细的《原生 Codex 逼近能力说明（大白话版）》。
+交接包里包含：**已经内置 Node + Context Bridge 的可安装 Desktop**、精确源码快照、机器验证报告、校验和，以及更详细的《原生 Codex 逼近能力说明》。普通接收方只需要安装 Desktop，不需要再手工部署 Bridge。
 
 **最后一句大白话总结：**这套 Fork 的价值不是“多几个工具”，而是让 ChatGPT + WebCodex 变成一个更可靠的本地开发 Agent——**懂项目、能真正动手、长任务不断、断线能恢复、真实操作不乱重试、Desktop 能安全升级、上游变化还能长期维护，而且不消耗 Native Codex 模型额度。**
 
