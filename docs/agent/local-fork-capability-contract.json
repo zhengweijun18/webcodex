@@ -71,5 +71,45 @@
       "external": true,
       "description": "When a context workspace is supplied, its machine-readable state must prove zero Codex model turns."
     }
+  ],
+  "retirement_groups": [
+    {
+      "id": "zero_quota_native_context",
+      "description": "Retire the local Native Context implementation only after upstream and a local-patch-removed rehearsal both satisfy the executable behavioral contract.",
+      "implementation_paths": [
+        "src/mcp_gateway.rs",
+        "src/tool_runtime/native_context.rs",
+        "src/tool_runtime/coding_task.rs",
+        "src/tool_runtime/dispatch.rs",
+        "src/tool_runtime/files/inspection.rs",
+        "src/tool_runtime/mod.rs",
+        "src/tool_runtime/startup_brief.rs",
+        "crates/webcodex-tool-contracts/src/registry/output_schemas/skills.rs",
+        "crates/webcodex-tool-contracts/src/registry/tool_specs/skills.rs",
+        "crates/webcodex-tool-contracts/src/tests/output_schemas.rs",
+        "crates/webcodex-tool-contracts/src/tests/policy_contracts.rs",
+        "crates/webcodex-tool-contracts/src/tool_call.rs",
+        "crates/webcodex-tool-contracts/src/tool_definition/skills.rs",
+        "crates/webcodex-tool-runtime-contracts/src/tool_audit.rs",
+        "crates/webcodex-workflow-session/src/model.rs",
+        "crates/webcodex-workflow-session/src/persistence.rs",
+        "crates/webcodex-workflow-session/src/store.rs",
+        "tooling/tools/codex-context-bridge"
+      ],
+      "verifier": {
+        "kind": "behavioral_capabilities",
+        "scope": "full"
+      }
+    },
+    {
+      "id": "desktop_lifecycle_hardening",
+      "description": "Retire the local one-shot Desktop lifecycle only after upstream and the patch-removed rehearsal satisfy the same lifecycle contract without restart wrappers.",
+      "implementation_paths": [
+        "scripts/local_desktop_lifecycle.py"
+      ],
+      "verifier": {
+        "kind": "desktop_lifecycle_contract"
+      }
+    }
   ]
 }

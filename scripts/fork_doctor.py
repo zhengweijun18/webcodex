@@ -210,6 +210,18 @@ def runtime_affecting_paths(paths: list[str]) -> list[str]:
     ]
 
 
+def resolve_commit(root: Path, value: str) -> str | None:
+    resolved = run(
+        ["git", "rev-parse", "--verify", f"{value}^{{commit}}"],
+        cwd=root,
+        check=False,
+    )
+    if resolved.returncode != 0:
+        return None
+    commit = resolved.stdout.strip()
+    return commit if re.fullmatch(r"[0-9a-f]{40}", commit) else None
+
+
 def check_deployment_gap(root: Path, app: Path):
     if platform.system() != "Darwin":
         return skipped("deployment-gap check is macOS-only")
@@ -218,13 +230,27 @@ def check_deployment_gap(root: Path, app: Path):
     identity = installed_runtime(root, app)
     source_head = git(root, "rev-parse", "HEAD")
     installed_commit = identity["commit"]
+    installed_full = resolve_commit(root, installed_commit)
+    if installed_full is None:
+        state = "unverifiable"
+    elif installed_full == source_head:
+        state = "closed"
+    else:
+        state = "open"
     data = {
         "source_head": source_head,
         "installed_commit": installed_commit,
+        "installed_commit_resolved": installed_full,
         "installed_version": identity["version"],
-        "deployment_gap": installed_commit != source_head,
+        "deployment_gap_state": state,
+        "deployment_gap": state != "closed",
     }
-    if installed_commit != source_head:
+    if state == "unverifiable":
+        return warning(
+            "deployment gap is unverifiable: installed runtime commit cannot be resolved in the current repository",
+            data,
+        )
+    if state == "open":
         return warning(
             "deployment gap is open: installed Desktop does not match current source HEAD",
             data,
@@ -244,16 +270,70 @@ def check_patch_retirement(root: Path, branch: str, upstream_ref: str):
         "upstream_ref": upstream_ref,
         "runtime_affecting_delta_count": len(runtime_delta),
         "runtime_affecting_delta": runtime_delta[:80],
-        "retirement_ready": not runtime_delta,
+        "static_retirement_candidate": not runtime_delta,
+        "retirement_ready": None,
+        "evidence_strength": "static_diff_only",
+        "behavioral_gate_required": True,
     }
     if runtime_delta:
         return passed(
-            "patch-retirement evaluated: local runtime delta still exists, so automatic retirement is not yet safe",
+            "patch-retirement static signal: local runtime delta exists; behavioral retirement rehearsal is required before removing any local implementation",
             data,
         )
     return passed(
-        "patch-retirement evaluated: no local runtime delta remains; local runtime patches are retirement candidates",
+        "patch-retirement static signal: no runtime delta remains, but behavioral retirement evidence is still the authority for deleting maintained capability code",
         data,
+    )
+
+
+def check_behavioral_patch_retirement(
+    root: Path,
+    branch: str,
+    upstream_ref: str,
+    enabled: bool,
+):
+    if not enabled:
+        return skipped("behavioral patch-retirement rehearsal not requested")
+    script = root / "scripts/check_patch_retirement.py"
+    if not script.is_file():
+        raise RuntimeError(f"behavioral patch-retirement checker is missing: {script}")
+    result = run(
+        [
+            sys.executable,
+            str(script),
+            "--root",
+            str(root),
+            "--branch",
+            branch,
+            "--upstream-ref",
+            upstream_ref,
+            "--json",
+        ],
+        cwd=root,
+        timeout=900,
+        check=False,
+    )
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"behavioral patch-retirement checker returned invalid JSON: {result.stderr[-2000:]}"
+        ) from exc
+    if result.returncode != 0 or value.get("status") == "failed":
+        raise RuntimeError(
+            "behavioral patch-retirement rehearsal failed to execute: "
+            + (value.get("error") or result.stderr[-2000:] or result.stdout[-2000:])
+        )
+    if value.get("status") == "needs_human_review":
+        return warning(
+            "behavioral patch-retirement rehearsal completed with groups requiring human review",
+            value,
+        )
+    ready = value.get("retirement_ready_groups") or []
+    blocked = value.get("retirement_blocked_groups") or []
+    return passed(
+        f"behavioral patch-retirement rehearsal completed: {len(ready)} ready, {len(blocked)} retained",
+        value,
     )
 
 
@@ -513,6 +593,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--context-workspace", type=Path)
     parser.add_argument("--forward-branch", default="vue-lsp-native-main")
     parser.add_argument("--upstream-ref", default="upstream/main")
+    parser.add_argument(
+        "--behavioral-retirement",
+        action="store_true",
+        help="run disposable-worktree behavioral patch-retirement rehearsal",
+    )
     parser.add_argument("--deep", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
@@ -539,6 +624,16 @@ def main() -> int:
         checks,
         "patch-retirement",
         lambda: check_patch_retirement(root, args.forward_branch, args.upstream_ref),
+    )
+    record(
+        checks,
+        "behavioral-patch-retirement",
+        lambda: check_behavioral_patch_retirement(
+            root,
+            args.forward_branch,
+            args.upstream_ref,
+            args.behavioral_retirement,
+        ),
     )
     record(checks, "capability-contract", lambda: check_capability_contract(root, args.context_workspace))
     record(

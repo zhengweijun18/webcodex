@@ -11,6 +11,10 @@ import sys
 
 
 CONTRACT = Path("docs/agent/local-fork-capability-contract.json")
+RETIREMENT_VERIFIER_KINDS = {
+    "behavioral_capabilities",
+    "desktop_lifecycle_contract",
+}
 
 
 def contains_any(root: Path, candidates: tuple[tuple[str, tuple[str, ...]], ...]) -> tuple[bool, dict]:
@@ -54,6 +58,45 @@ def valid_zero_quota_state(state_path: Path | None) -> tuple[bool, dict]:
         "readonly_model_turn_started": readonly.get("model_turn_started"),
         "acp_coding_agent_enabled": value.get("native_runtime", {}).get("acp_coding_agent_enabled"),
     }
+
+
+def validate_retirement_groups(contract: dict) -> dict:
+    groups = contract.get("retirement_groups", [])
+    if not isinstance(groups, list):
+        raise RuntimeError("retirement_groups must be a list")
+    ids = set()
+    validated = []
+    for group in groups:
+        if not isinstance(group, dict):
+            raise RuntimeError("retirement group must be an object")
+        group_id = group.get("id")
+        paths = group.get("implementation_paths")
+        verifier = group.get("verifier")
+        if not isinstance(group_id, str) or not group_id or group_id in ids:
+            raise RuntimeError(f"invalid or duplicate retirement group id: {group_id!r}")
+        ids.add(group_id)
+        if not isinstance(paths, list) or not paths:
+            raise RuntimeError(f"retirement group {group_id} requires implementation_paths")
+        for relative in paths:
+            if (
+                not isinstance(relative, str)
+                or not relative
+                or relative.startswith("/")
+                or ".." in Path(relative).parts
+            ):
+                raise RuntimeError(
+                    f"retirement group {group_id} has unsafe implementation path: {relative!r}"
+                )
+        if not isinstance(verifier, dict) or verifier.get("kind") not in RETIREMENT_VERIFIER_KINDS:
+            raise RuntimeError(f"retirement group {group_id} has unsupported verifier")
+        validated.append(
+            {
+                "id": group_id,
+                "implementation_path_count": len(paths),
+                "verifier_kind": verifier["kind"],
+            }
+        )
+    return {"count": len(validated), "groups": validated}
 
 
 def probe(root: Path, capability: str, zero_quota_state: Path | None) -> tuple[bool, dict]:
@@ -234,6 +277,7 @@ def check(root: Path, contract_path: Path, zero_quota_state: Path | None = None)
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     if contract.get("schema_version") != 1:
         raise RuntimeError("unsupported capability contract schema")
+    retirement_groups = validate_retirement_groups(contract)
     results = []
     for capability in contract.get("capabilities", []):
         capability_id = capability.get("id")
@@ -257,6 +301,7 @@ def check(root: Path, contract_path: Path, zero_quota_state: Path | None = None)
         "schema_version": contract["schema_version"],
         "contract": str(contract_path),
         "capabilities": results,
+        "retirement_groups": retirement_groups,
         "failed_required_capabilities": failures,
         "mutations_performed": False,
     }

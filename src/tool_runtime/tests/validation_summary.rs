@@ -542,6 +542,74 @@ fn durable_async_validation_terminal_success_resolves_same_target_without_accept
     assert_eq!(validation["events_total"], 2);
 }
 
+#[test]
+fn durable_silent_cargo_fmt_terminal_success_resolves_same_target_without_parser_output() {
+    let runtime = test_runtime();
+    let project = "agent:validation-silent-fmt:project".to_string();
+    let session = runtime
+        .sessions
+        .start_session(Some(project.clone()), Some("silent fmt".to_string()));
+    let target = "target:abcdef0123456789abcdef01";
+    let start = runtime.sessions.record_tool_call_started(
+        Some(&session.session_id),
+        SessionTransport::Api,
+        "cargo_fmt",
+        &json!({"project": project, "validation_target_id": target}),
+        crate::tool_runtime::sessions::session_tool_contract("cargo_fmt"),
+    );
+    runtime.sessions.record_tool_call_finished(
+        start,
+        false,
+        &json!({
+            "execution_state": "completed",
+            "exit_code": 1,
+            "stdout_tail": "Diff in src/lib.rs\n",
+            "stderr_tail": "",
+            "stdout_truncated": false,
+            "stderr_truncated": false
+        }),
+        Some("format failed"),
+        None,
+    );
+    let terminal_output = json!({
+        "purpose": "format",
+        "execution_state": "completed",
+        "exit_code": 0,
+        "stdout_tail": "",
+        "stderr_tail": "",
+        "stdout_truncated": false,
+        "stderr_truncated": false
+    });
+    let terminal_summary = crate::tool_runtime::sessions::execution_output_summary_for_tool_result(
+        "cargo_fmt",
+        &terminal_output,
+    );
+    assert!(runtime.sessions.record_validation_job_terminal(
+        &session.session_id,
+        "job-silent-fmt-success",
+        &["job-silent-fmt-success"],
+        "cargo_fmt",
+        crate::tool_runtime::sessions::session_tool_contract("cargo_fmt"),
+        Some(project),
+        target,
+        None,
+        "completed",
+        Some(0),
+        None,
+        Some(200),
+        Some(201),
+        Some(1_000),
+        terminal_summary,
+    ));
+    let summary = runtime.sessions.summary(&session.session_id, None).unwrap();
+    let validation =
+        crate::tool_runtime::validation_events::validation_summary_from_events(&summary.events, 20);
+    assert_eq!(validation["latest_status"], "passed");
+    assert_eq!(validation["historical_failures"]["count"], 1);
+    assert_eq!(validation["historical_failures"]["resolved"], true);
+    assert_eq!(validation["unresolved_failures"]["count"], 0);
+}
+
 #[tokio::test]
 async fn validation_summary_keeps_zero_tests_from_resolving_cargo_test_failure() {
     let tmp = tempfile::tempdir().unwrap();

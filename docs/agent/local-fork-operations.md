@@ -189,8 +189,9 @@ Verify a candidate without installing it:
 python3 scripts/local_desktop_lifecycle.py verify --candidate /path/to/WebCodex\ Desktop.app
 ```
 
-Install and rollback are intentionally unavailable while WebCodex processes are
-running and require exact confirmation words:
+An install that would actually replace the app, and every rollback, is
+intentionally unavailable while WebCodex processes are running. Mutating
+operations require exact confirmation words:
 
 ```bash
 python3 scripts/local_desktop_lifecycle.py install \
@@ -202,9 +203,33 @@ python3 scripts/local_desktop_lifecycle.py rollback \
   --confirm ROLLBACK
 ```
 
-Each mutation verifies codesign plus bundled runtime identity, takes a safety
-backup, uses a same-filesystem replacement, verifies the result, and writes a
-local receipt under the Desktop Application Support directory.
+For an operator-driven **one-shot** switch from a currently running Desktop,
+use `adopt` from an independent Terminal shell:
+
+```bash
+python3 scripts/local_desktop_lifecycle.py adopt \
+  --candidate /path/to/WebCodex\ Desktop.app \
+  --confirm ADOPT
+```
+
+`adopt` verifies the candidate before requesting Desktop quit. A same-identity
+retry is a no-op. A real upgrade quits once, takes a verified backup, installs,
+verifies, relaunches once, performs a bounded health check, and promotes the
+candidate to Last Known Good only after Runner and Server are observed healthy.
+Health failure triggers automatic rollback under the same lifecycle lock.
+
+**Do not wrap Desktop adoption in `launchctl submit`, KeepAlive, a respawning
+restart script, or any other self-restarting supervisor.** The supported running
+upgrade contract is one invocation of `adopt`; the lifecycle command itself
+owns the single quit/install/relaunch transaction.
+
+Each mutation verifies codesign plus bundled runtime identity, serializes
+concurrent lifecycle changes with a local lock, records append-only install
+history plus the current receipt, and maintains a persisted release state with
+Last Known Good and rollback-target identities. `promote-current --confirm
+PROMOTE` can seed that state from an already-running healthy Desktop without
+installing or restarting it. `prune-backups` previews redundant same-identity
+backups; deletion still requires `--confirm PRUNE`.
 
 ## Maintenance boundary
 
@@ -216,3 +241,25 @@ gains the equivalent capability. New local behavior should have:
 3. a rollback path;
 4. no hidden Codex model turn;
 5. no generic destructive external-action passthrough.
+
+Static diff evidence is never enough to delete a maintained compatibility
+patch. The capability contract defines behavioral retirement groups. Rehearse
+one or all groups in disposable worktrees:
+
+```bash
+python3 scripts/check_patch_retirement.py --json
+python3 scripts/check_patch_retirement.py \
+  --group zero_quota_native_context \
+  --json
+```
+
+A group is `retirable` only when the current branch passes its verifier, pure
+upstream passes the same verifier, and a rebased maintenance branch with that
+group's local implementation restored from upstream still passes. The real
+maintenance branch is never reset, rebased, edited, installed, or restarted.
+
+The normal doctor keeps this expensive gate off. Use
+`python3 scripts/fork_doctor.py --behavioral-retirement` only when evaluating
+actual patch retirement; the ordinary `patch-retirement` doctor check is a
+cheap static signal and deliberately reports no authoritative
+`retirement_ready` verdict.

@@ -2556,6 +2556,21 @@ mod recovery_projection_tests {
 
     #[test]
     fn validation_projection_keeps_lifecycle_terminals_distinct_from_validation_failure() {
+        let silent_fmt = validation_job_projection(
+            Some("cargo_fmt"),
+            Some("format"),
+            "completed",
+            Some(0),
+            "",
+            "",
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(silent_fmt["state"], "completed");
+        assert_eq!(silent_fmt["passed"], true);
+        assert!(silent_fmt.get("diagnostics").is_none());
+
         let fmt = validation_job_projection(
             Some("cargo_fmt"),
             Some("format"),
