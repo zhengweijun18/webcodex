@@ -15,6 +15,8 @@
 
 ### 直接下载安装
 
+> 四个平台版本均为独立安装包，请按设备系统与 CPU 架构选择对应版本，不要混用架构。
+
 普通用户无需克隆源码，直接从
 [GitHub Releases](https://github.com/zhengweijun18/webcodex/releases/latest)
 下载增强版 Desktop，退出原 WebCodex Desktop 后覆盖安装即可：
