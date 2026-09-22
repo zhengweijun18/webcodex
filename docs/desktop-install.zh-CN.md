@@ -23,9 +23,10 @@
 
 ## 1. 安装 WebCodex Desktop
 
-从 [GitHub Releases](https://github.com/yyjeqhc/webcodex/releases) 下载对应安装包：
+从 [GitHub Releases](https://github.com/zhengweijun18/webcodex/releases) 下载对应安装包：
 
-- **Windows：**使用 Windows x64 installer。
+- **Windows x64：**使用 `win32-x64-setup.exe`。
+- **Windows ARM64：**使用 `win32-arm64-setup.exe`。
 - **macOS：**按 Mac 架构选择 Intel 或 Apple Silicon DMG。
 
 当前 macOS 构建使用 ad-hoc 签名且没有 notarization。如果 Gatekeeper 拦截新下载构建的首次启动，进入**系统设置 → 隐私与安全 → 仍要打开**，再确认**打开**；不要全局关闭 Gatekeeper。

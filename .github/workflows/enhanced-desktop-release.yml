@@ -1,0 +1,418 @@
+name: Enhanced Desktop release
+
+run-name: Enhanced Desktop ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - "v0.4.2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enhanced-desktop-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
+      built_at: ${{ steps.metadata.outputs.built_at }}
+      short_source: ${{ steps.metadata.outputs.short_source }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Resolve immutable enhanced Desktop source
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          test "$tag" = "v0.4.2"
+          test "$(git cat-file -t "$tag")" = tag
+          source_sha="$(git rev-list -n 1 "$tag")"
+          test "$(git rev-parse HEAD)" = "$source_sha"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          test "v$version" = "$tag"
+          built_at="$(git for-each-ref --format='%(taggerdate:unix)' "refs/tags/$tag")"
+          [[ "$built_at" =~ ^[0-9]+$ ]]
+          short_source="${source_sha:0:12}"
+          {
+            echo "version=$version"
+            echo "source_sha=$source_sha"
+            echo "built_at=$built_at"
+            echo "short_source=$short_source"
+          } >> "$GITHUB_OUTPUT"
+
+  macos:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-15
+            host_arch: arm64
+            rust_host: aarch64-apple-darwin
+            file_arch: arm64
+          - platform: darwin-x64
+            runner: macos-15-intel
+            host_arch: x86_64
+            rust_host: x86_64-apple-darwin
+            file_arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      SHORT_SOURCE: ${{ needs.prepare.outputs.short_source }}
+      WEBCODEX_BUILT_AT: ${{ needs.prepare.outputs.built_at }}
+      WEBCODEX_RELEASE_PLATFORM: ${{ matrix.platform }}
+      EXPECTED_HOST_ARCH: ${{ matrix.host_arch }}
+      EXPECTED_RUST_HOST: ${{ matrix.rust_host }}
+      EXPECTED_FILE_ARCH: ${{ matrix.file_arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: enhanced-desktop-${{ matrix.platform }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Build and verify native macOS runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "$EXPECTED_HOST_ARCH"
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "$EXPECTED_RUST_HOST"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          export WEBCODEX_RELEASE_VERSION="$VERSION"
+          cargo build --locked --release -p webcodex -p webcodex-cli -p webcodex-runner
+          for name in webcodex webcodex-server webcodex-runner; do
+            binary="target/release/$name"
+            expected="$name $VERSION (commit $SHORT_SOURCE, dirty=false, built_at=$WEBCODEX_BUILT_AT)"
+            test "$("$binary" --version)" = "$expected"
+            file "$binary" | grep -q "$EXPECTED_FILE_ARCH"
+          done
+
+      - name: Install Desktop dependencies
+        run: npm ci --prefix apps/desktop
+
+      - name: Stage bundled Node and Context Bridge
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/enhanced-desktop-$WEBCODEX_RELEASE_PLATFORM-bundle"
+          tool_cache="$RUNNER_TEMP/enhanced-desktop-$WEBCODEX_RELEASE_PLATFORM-tools"
+          bundled_node="$(bash scripts/prepare_bundled_node_macos.sh --platform "$WEBCODEX_RELEASE_PLATFORM" --output-dir "$tool_cache")"
+          bridge_version="$(node -p "require('./tooling/tools/codex-context-bridge/package.json').version")"
+          python3 scripts/prepare_desktop_bundle_macos.py \
+            --bin-dir target/release \
+            --version "$VERSION" \
+            --source-sha "$SOURCE_SHA" \
+            --built-at "$WEBCODEX_BUILT_AT" \
+            --platform "$WEBCODEX_RELEASE_PLATFORM" \
+            --signing-mode adhoc \
+            --node-bin "$bundled_node" \
+            --node-version v24.21.0 \
+            --context-bridge-dir tooling/tools/codex-context-bridge \
+            --context-bridge-version "$bridge_version" \
+            --output-dir "$stage"
+          name="webcodex-desktop-v$VERSION-$WEBCODEX_RELEASE_PLATFORM.dmg"
+          {
+            echo "config=$stage/tauri.bundle.conf.json"
+            echo "metadata=$stage/desktop-bundle.json"
+            echo "name=$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build ad-hoc signed macOS DMG
+        id: dmg
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          export APPLE_SIGNING_IDENTITY="-"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/enhanced-desktop-$WEBCODEX_RELEASE_PLATFORM-tauri"
+          npm exec tauri -- build --bundles dmg --config "${{ steps.bundle.outputs.config }}" --ci -- --locked
+          shopt -s nullglob
+          candidates=("$CARGO_TARGET_DIR/release/bundle/dmg"/*.dmg)
+          test "${#candidates[@]}" -eq 1
+          mkdir -p "$GITHUB_WORKSPACE/release-assets"
+          path="$GITHUB_WORKSPACE/release-assets/${{ steps.bundle.outputs.name }}"
+          cp "${candidates[0]}" "$path"
+          digest="$(shasum -a 256 "$path" | awk '{print $1}')"
+          printf '%s  %s\n' "$digest" "$(basename "$path")" > "$path.sha256"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke installed macOS Desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/desktop_install_macos_smoke.sh \
+            --dmg "${{ steps.dmg.outputs.path }}" \
+            --version "$VERSION" \
+            --source-sha "$SOURCE_SHA" \
+            --built-at "$WEBCODEX_BUILT_AT" \
+            --platform "$WEBCODEX_RELEASE_PLATFORM" \
+            --stage-metadata "${{ steps.bundle.outputs.metadata }}" \
+            --signing-mode adhoc \
+            --evidence "$GITHUB_WORKSPACE/release-assets/${{ steps.bundle.outputs.name }}.evidence.json"
+
+      - name: Upload macOS release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: enhanced-desktop-${{ matrix.platform }}
+          path: |
+            release-assets/*.dmg
+            release-assets/*.dmg.sha256
+            release-assets/*.dmg.evidence.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  windows:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            processor_architecture: AMD64
+            pe_machine: "8664"
+            node_architecture: x64
+          - platform: win32-arm64
+            runner: windows-11-arm
+            rust_target: aarch64-pc-windows-msvc
+            processor_architecture: ARM64
+            pe_machine: "AA64"
+            node_architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 70
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      SHORT_SOURCE: ${{ needs.prepare.outputs.short_source }}
+      WEBCODEX_BUILT_AT: ${{ needs.prepare.outputs.built_at }}
+      WEBCODEX_RELEASE_PLATFORM: ${{ matrix.platform }}
+      RUST_TARGET: ${{ matrix.rust_target }}
+      EXPECTED_PROCESSOR_ARCHITECTURE: ${{ matrix.processor_architecture }}
+      EXPECTED_PE_MACHINE: ${{ matrix.pe_machine }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: ${{ matrix.node_architecture }}
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: enhanced-desktop-${{ matrix.platform }}
+
+      - name: Build and verify native Windows runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:PROCESSOR_ARCHITECTURE -ne $env:EXPECTED_PROCESSOR_ARCHITECTURE) { throw "Unexpected Windows host architecture" }
+          $hostLine = rustc -vV | Select-String '^host: '
+          if ($hostLine.Line -ne "host: $env:RUST_TARGET") { throw "Unexpected Rust host: $($hostLine.Line)" }
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw "Build checkout does not match release source" }
+          if (@(git status --porcelain --untracked-files=all).Count -ne 0) { throw "Release checkout is not clean" }
+          $env:WEBCODEX_RELEASE_VERSION = $env:VERSION
+          cargo build --locked --release --target $env:RUST_TARGET -p webcodex -p webcodex-cli -p webcodex-runner
+          if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+          $binDir = Join-Path "target" (Join-Path $env:RUST_TARGET "release")
+          $expectedMachine = [Convert]::ToUInt16($env:EXPECTED_PE_MACHINE, 16)
+          foreach ($name in @("webcodex", "webcodex-server", "webcodex-runner")) {
+            $binary = Join-Path $binDir "$name.exe"
+            $line = @(& $binary --version) | Select-Object -First 1
+            $expected = "$name $env:VERSION (commit $env:SHORT_SOURCE, dirty=false, built_at=$env:WEBCODEX_BUILT_AT)"
+            if ($line.TrimEnd() -ne $expected) { throw "Unexpected $name identity: $line" }
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $binary))
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            if ($machine -ne $expectedMachine) { throw ("Unexpected PE machine for {0}: 0x{1:x4}" -f $binary, $machine) }
+          }
+
+      - name: Install Desktop dependencies
+        run: npm ci --prefix apps/desktop
+
+      - name: Stage bundled Node and Context Bridge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $binDir = Join-Path "target" (Join-Path $env:RUST_TARGET "release")
+          $stage = Join-Path $env:RUNNER_TEMP "enhanced-desktop-$env:WEBCODEX_RELEASE_PLATFORM-bundle"
+          $toolCache = Join-Path $env:RUNNER_TEMP "enhanced-desktop-$env:WEBCODEX_RELEASE_PLATFORM-tools"
+          $bundledNode = @(& .\scripts\prepare_bundled_node_windows.ps1 -Platform $env:WEBCODEX_RELEASE_PLATFORM -OutputDir $toolCache) | Select-Object -Last 1
+          if (-not $bundledNode) { throw "bundled Node preparation returned no path" }
+          $bridgeVersion = (node -p "require('./tooling/tools/codex-context-bridge/package.json').version").Trim()
+          $args = @{
+            BinDir = $binDir
+            Version = $env:VERSION
+            SourceSha = $env:SOURCE_SHA
+            BuiltAt = [Int64]$env:WEBCODEX_BUILT_AT
+            Platform = $env:WEBCODEX_RELEASE_PLATFORM
+            NodeBin = [string]$bundledNode
+            NodeVersion = "v24.21.0"
+            ContextBridgeDir = "tooling\tools\codex-context-bridge"
+            ContextBridgeVersion = $bridgeVersion
+            OutputDir = $stage
+          }
+          & .\scripts\prepare_desktop_bundle.ps1 @args
+          $name = "webcodex-desktop-v$env:VERSION-$env:WEBCODEX_RELEASE_PLATFORM-setup.exe"
+          $target = Join-Path $env:RUNNER_TEMP "enhanced-desktop-$env:WEBCODEX_RELEASE_PLATFORM-tauri"
+          "DESKTOP_TAURI_CONFIG=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_ENV
+          "DESKTOP_STAGE_METADATA=$(Join-Path $stage 'desktop-bundle.json')" >> $env:GITHUB_ENV
+          "DESKTOP_TAURI_TARGET=$target" >> $env:GITHUB_ENV
+          "DESKTOP_INSTALLER_NAME=$name" >> $env:GITHUB_ENV
+
+      - name: Build unsigned native Windows NSIS installer
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:CARGO_TARGET_DIR = $env:DESKTOP_TAURI_TARGET
+          node node_modules/@tauri-apps/cli/tauri.js build --bundles nsis --config $env:DESKTOP_TAURI_CONFIG --ci --no-sign -- --locked
+          if ($LASTEXITCODE -ne 0) { throw "Tauri NSIS build failed" }
+          $bundleDir = Join-Path $env:CARGO_TARGET_DIR "release\bundle\nsis"
+          $built = @(Get-ChildItem -LiteralPath $bundleDir -Filter "*-setup.exe" -File)
+          if ($built.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($built.Count)" }
+          $assetDir = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+          $installer = Join-Path $assetDir $env:DESKTOP_INSTALLER_NAME
+          Copy-Item -LiteralPath $built[0].FullName -Destination $installer
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText("$installer.sha256", "$hash  $env:DESKTOP_INSTALLER_NAME`n", [System.Text.Encoding]::ASCII)
+          "DESKTOP_INSTALLER_PATH=$installer" >> $env:GITHUB_ENV
+
+      - name: Smoke installed Windows Desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $args = @{
+            Installer = $env:DESKTOP_INSTALLER_PATH
+            Version = $env:VERSION
+            SourceSha = $env:SOURCE_SHA
+            BuiltAt = [Int64]$env:WEBCODEX_BUILT_AT
+            Platform = $env:WEBCODEX_RELEASE_PLATFORM
+            StageMetadata = $env:DESKTOP_STAGE_METADATA
+          }
+          & .\scripts\desktop_install_windows_smoke.ps1 @args
+
+      - name: Upload Windows release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: enhanced-desktop-${{ matrix.platform }}
+          path: |
+            release-assets/*-setup.exe
+            release-assets/*-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    needs: [prepare, macos, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      SHORT_SOURCE: ${{ needs.prepare.outputs.short_source }}
+    steps:
+      - name: Download verified Desktop assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: enhanced-desktop-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify complete cross-platform asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            "webcodex-desktop-v$VERSION-darwin-arm64.dmg"
+            "webcodex-desktop-v$VERSION-darwin-x64.dmg"
+            "webcodex-desktop-v$VERSION-win32-x64-setup.exe"
+            "webcodex-desktop-v$VERSION-win32-arm64-setup.exe"
+          )
+          for name in "${expected[@]}"; do
+            test -s "release-assets/$name"
+            test -s "release-assets/$name.sha256"
+            (cd release-assets && shasum -a 256 -c "$name.sha256")
+          done
+          test "$(find release-assets -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-setup.exe' \) | wc -l | tr -d ' ')" = 4
+
+      - name: Create public GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          cat > "$notes" <<EOF
+          ## WebCodex Enhanced Desktop v$VERSION
+
+          Source: $SOURCE_SHA
+          Version: $VERSION
+
+          This release packages the maintained Zero-Quota / Native Context enhanced runtime as a single-install Desktop build.
+
+          Choose your installer:
+          - macOS Apple Silicon (M1/M2/M3/M4): darwin-arm64.dmg
+          - macOS Intel: darwin-x64.dmg
+          - Windows x64: win32-x64-setup.exe
+          - Windows ARM64: win32-arm64-setup.exe
+
+          Install over the existing WebCodex Desktop installation. User configuration remains in the normal WebCodex user-data location.
+
+          macOS builds are ad-hoc signed and not notarized; if macOS blocks first launch, use System Settings → Privacy & Security → Open Anyway.
+          Windows installers are unsigned; Windows SmartScreen may ask for confirmation.
+
+          Each installer has a matching SHA-256 file. Native install smoke, bundled Node/Context Bridge readiness, architecture identity, and native_model_turns = 0 checks completed before this Release was created.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/*.dmg \
+            release-assets/*.dmg.sha256 \
+            release-assets/*-setup.exe \
+            release-assets/*-setup.exe.sha256 \
+            release-assets/*.dmg.evidence.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "WebCodex Enhanced Desktop v$VERSION" \
+            --notes-file "$notes" \
+            --latest

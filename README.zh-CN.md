@@ -11,7 +11,20 @@
 > **一句话先说清楚：**这套 Fork 是为了让 **ChatGPT + WebCodex 更像一个可靠的本地开发 Agent**——它能自动理解项目、真正操作本机代码、跑长任务、断线后继续、安全处理真实副作用、使用 Vue LSP、自己判断补丁何时可以退休，还能安全升级 Desktop；同时 **Native Codex 模型调用保持为 0**。
 
 增强实现分支：[`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)
-当前已验证基线：`6a3f3ea49e9f34f5919ae69d8f33afd7e76f7c15`
+当前已验证跨平台基线：`acc84e9f87a18af852f9076e63b72e10c8bb6c0e`
+
+### 直接下载安装
+
+普通用户无需克隆源码，直接从
+[GitHub Releases](https://github.com/zhengweijun18/webcodex/releases/latest)
+下载增强版 Desktop，退出原 WebCodex Desktop 后覆盖安装即可：
+
+- macOS Apple Silicon：`darwin-arm64.dmg`
+- macOS Intel：`darwin-x64.dmg`
+- Windows x64：`win32-x64-setup.exe`
+- Windows ARM64：`win32-arm64-setup.exe`
+
+安装包已经内置增强运行时所需的 Node 与 Context Bridge，原有 WebCodex 用户配置继续保留。
 
 ### 15 个核心功能点
 
@@ -29,7 +42,7 @@
 12. **Upstream 升级先在临时 worktree 演习**：先在 disposable worktree 里测试 rebase/merge、编译和能力行为，不直接改真实维护分支，避免一次上游升级把正在用的分支弄乱。
 13. **自带 Doctor 健康检查**：可以机器化检查源码、已安装 Desktop、正在运行的 Server/Runner、rollback backup、Vue 工具链、Zero-Quota evidence、Context Bridge、upstream 状态和 deployment alignment。
 14. **Desktop 构建可追溯到精确源码和工具链**：每个正式候选都能回答“它到底由哪个 commit 编出来、是不是 dirty build、Rust/Node/Vue 工具链是什么、三个 runtime binary 是不是同一版本、SHA256 是什么”。
-15. **增强 Runtime 变成 Single-Install**：macOS Desktop 现在直接内置固定版官方 Node 与 Context Bridge 0.5.0；Desktop-owned Runner 在用户没有显式同名配置时自动注册 bundled `codex_context`，普通接收方只装 Desktop，不再手工装 Node、复制 Bridge 或修改 `runner.toml`。
+15. **增强 Runtime 变成跨平台 Single-Install**：macOS Intel / Apple Silicon、Windows x64 / ARM64 Desktop 都内置固定版官方 Node 与 Context Bridge；Desktop-owned Runner 在用户没有显式同名配置时自动注册 bundled `codex_context`，普通接收方只装 Desktop，不再手工装 Node、复制 Bridge 或修改 `runner.toml`。
 
 ### 你实际使用时，大概是什么体验
 
@@ -166,7 +179,7 @@ WebCodex
 - **Linux x64/arm64** —— 支持本机 `share`、Server 和 Runner 工作流。
 - **macOS x64/arm64** —— 支持 Desktop 本机 Server + Runner、OpenAI Secure Tunnel、本机 `share` 和独立 Runner 工作流。
 - **Windows x64** —— 推荐 Desktop 本机 Server + Runner + 官方 OpenAI Secure Tunnel；同时支持 CLI + Runner、本地前台 Server，以及显式 `webcodex share --tunnel cloudflare|openai|none`。
-- **Windows arm64** —— 支持 CLI + Runner、本地前台 Server 与 `share`，managed OpenAI `tunnel-client` 可用。固定版本 Cloudflare 没有官方 Windows ARM64 artifact，因此使用 Cloudflare 时需要受信任的显式/`PATH` `cloudflared`。当前 Desktop installer 仅提供 Windows x64。除 Desktop 自己托管的前台 runtime 外，WebCodex-managed Windows Server service 仍不支持。
+- **Windows arm64** —— 支持增强版 Desktop 本机 Server + Runner、CLI + Runner、本地前台 Server 与 `share`，managed OpenAI `tunnel-client` 可用。固定版本 Cloudflare 没有官方 Windows ARM64 artifact，因此使用 Cloudflare 时需要受信任的显式/`PATH` `cloudflared`。除 Desktop 自己托管的前台 runtime 外，WebCodex-managed Windows Server service 仍不支持。
 
 Windows 接入和长期部署见[部署指南](docs/DEPLOYMENT.zh-CN.md)与 [MCP](docs/MCP.zh-CN.md)。
 

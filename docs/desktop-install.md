@@ -23,9 +23,10 @@ For everyday use after installation, see [Using Desktop](desktop-guide.md). Home
 
 ## 1. Install WebCodex Desktop
 
-Download the matching Desktop artifact from the [GitHub Releases](https://github.com/yyjeqhc/webcodex/releases) page:
+Download the matching Desktop artifact from the [GitHub Releases](https://github.com/zhengweijun18/webcodex/releases) page:
 
-- **Windows:** use the Windows x64 installer.
+- **Windows x64:** use `win32-x64-setup.exe`.
+- **Windows ARM64:** use `win32-arm64-setup.exe`.
 - **macOS:** use the DMG matching your Mac architecture, Intel or Apple Silicon.
 
 Current macOS builds are ad-hoc signed and are not notarized. If Gatekeeper blocks the first launch of a newly downloaded build, open **System Settings → Privacy & Security → Open Anyway**, then confirm **Open**. Do not disable Gatekeeper globally.

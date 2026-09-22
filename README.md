@@ -11,7 +11,20 @@ Ask your assistant to inspect a repository, modify code, run tests, use Git, or 
 > **What this fork is for:** make **ChatGPT + WebCodex** behave more like a reliable local coding agent — with project awareness, durable jobs, recoverable workflows, safer real-world effects, native Vue LSP, self-maintaining fork logic, and safe Desktop upgrades — while keeping **Native Codex model usage at zero**.
 
 Enhanced implementation branch: [`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)
-Current validated baseline: `6a3f3ea49e9f34f5919ae69d8f33afd7e76f7c15`
+Current validated cross-platform baseline: `acc84e9f87a18af852f9076e63b72e10c8bb6c0e`
+
+### Direct downloads
+
+Ordinary users do not need to clone the source. Download the enhanced Desktop from
+[GitHub Releases](https://github.com/zhengweijun18/webcodex/releases/latest),
+quit the existing WebCodex Desktop, and install the package matching the machine:
+
+- macOS Apple Silicon: `darwin-arm64.dmg`
+- macOS Intel: `darwin-x64.dmg`
+- Windows x64: `win32-x64-setup.exe`
+- Windows ARM64: `win32-arm64-setup.exe`
+
+The installer already contains the bundled Node runtime and Context Bridge; existing WebCodex user data is retained.
 
 ### 15 core capabilities
 
@@ -29,7 +42,7 @@ Current validated baseline: `6a3f3ea49e9f34f5919ae69d8f33afd7e76f7c15`
 12. **Disposable upstream upgrade rehearsal** — upstream changes are rehearsed in temporary worktrees first, so merge/rebase compatibility and capability behavior can be tested without rewriting the real maintenance branch.
 13. **Built-in Doctor health check** — source, installed Desktop, running Server/Runner, rollback backup, Vue toolchain, Zero-Quota evidence, Context Bridge, upstream state, and deployment alignment can be checked mechanically.
 14. **Reproducible Desktop provenance** — every formal Desktop candidate can be traced to the exact source commit, build time, toolchain, runtime binary hashes, codesign result, and dirty/clean state.
-15. **Single-install enhanced runtime** — the macOS Desktop bundle now carries a pinned official Node runtime plus Context Bridge 0.5.0; Desktop-owned Runner registration injects the bundled `codex_context` provider when the user has not explicitly configured one, so ordinary recipients no longer install Node, copy the Bridge, or edit `runner.toml` by hand.
+15. **Cross-platform single-install enhanced runtime** — macOS Intel / Apple Silicon and Windows x64 / ARM64 Desktop bundles carry the pinned official Node runtime plus Context Bridge; Desktop-owned Runner registration injects the bundled `codex_context` provider when the user has not explicitly configured one, so ordinary recipients no longer install Node, copy the Bridge, or edit `runner.toml` by hand.
 
 ### What using it feels like
 
@@ -158,7 +171,7 @@ For the internal Server/Runner architecture, protocol surfaces, and authority bo
 - **Linux x64/arm64** — local `share`, Server, and Runner workflows.
 - **macOS x64/arm64** — Desktop local Server + Runner, OpenAI Secure Tunnel, local `share`, and standalone Runner workflows.
 - **Windows x64** — Desktop local Server + Runner with the official OpenAI Secure Tunnel, plus CLI + Runner, local foreground Server, and explicit `webcodex share --tunnel cloudflare|openai|none`.
-- **Windows arm64** — CLI + Runner, local foreground Server, and `share`; managed OpenAI `tunnel-client` is supported. The pinned Cloudflare release has no official Windows ARM64 artifact, so Cloudflare requires a trusted explicit/PATH `cloudflared`. The Desktop installer is currently Windows x64 only. WebCodex-managed Windows Server services remain unsupported outside Desktop's owned foreground runtime.
+- **Windows arm64** — the enhanced Desktop local Server + Runner, CLI + Runner, local foreground Server, and `share`; managed OpenAI `tunnel-client` is supported. The pinned Cloudflare release has no official Windows ARM64 artifact, so Cloudflare requires a trusted explicit/PATH `cloudflared`. WebCodex-managed Windows Server services remain unsupported outside Desktop's owned foreground runtime.
 
 Windows and long-lived deployments are covered in [Deployment](docs/DEPLOYMENT.md) and [MCP](docs/MCP.md).
 
