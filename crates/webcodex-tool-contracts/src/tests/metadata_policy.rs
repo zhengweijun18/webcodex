@@ -131,6 +131,7 @@ fn tool_specs_annotations_are_canonical_semantic_projections() {
         #[cfg(feature = "workspace-checkpoints")]
         "workspace_checkpoint_create",
         "git_commit_paths",
+        "git_push",
         "artifact_upload_begin",
         "artifact_upload_chunk",
         "computer_save_snapshot",
@@ -172,6 +173,15 @@ fn tool_specs_annotations_are_canonical_semantic_projections() {
     assert_eq!(commit.idempotency, ToolIdempotency::NonIdempotent);
     assert_eq!(
         commit.authority,
+        ToolAuthorityPolicy::RequireAll(&[PROJECT_WRITE, JOB_RUN])
+    );
+    let push = lookup_tool_metadata("git_push").unwrap();
+    assert_eq!(push.effect, ToolEffect::Mutate);
+    assert_eq!(push.risk, ToolRisk::ProjectWrite);
+    assert_eq!(push.approval, ToolApprovalPolicy::Standard);
+    assert_eq!(push.idempotency, ToolIdempotency::FencedReplay);
+    assert_eq!(
+        push.authority,
         ToolAuthorityPolicy::RequireAll(&[PROJECT_WRITE, JOB_RUN])
     );
     assert_eq!(

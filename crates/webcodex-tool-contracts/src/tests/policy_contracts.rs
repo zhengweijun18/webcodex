@@ -647,6 +647,11 @@ fn required_runner_capability_matches_metadata_risk_table() {
             RunnerCapabilityRequirement::GitOrShell,
         ),
         (
+            "git_push",
+            ToolRisk::ProjectWrite,
+            RunnerCapabilityRequirement::GitOrShell,
+        ),
+        (
             "discard_untracked",
             ToolRisk::ProjectWrite,
             RunnerCapabilityRequirement::StructuredProcess,
