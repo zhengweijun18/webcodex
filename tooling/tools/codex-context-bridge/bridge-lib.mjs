@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import {
   BRIDGE_VERSION,
   codexChildEnvironment,
+  codexSpawnOptions,
   resolveCodexExecutable
 } from "./readiness.mjs";
 
@@ -66,11 +67,11 @@ function rpcTimeout(ms, message) {
 
 export async function codexRpc(method, params, { timeoutMs = 12000 } = {}) {
   const codexBin = requireCodexBin();
-  const child = spawn(codexBin, ["app-server", "--stdio"], {
+  const child = spawn(codexBin, ["app-server", "--stdio"], codexSpawnOptions(codexBin, {
     cwd: DEFAULT_PROJECT_ROOT,
     env: codexChildEnvironment(codexBin),
     stdio: ["pipe", "pipe", "pipe"]
-  });
+  }));
   let stderr = "";
   child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-16000); });
   const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
@@ -114,11 +115,11 @@ export async function codexRpc(method, params, { timeoutMs = 12000 } = {}) {
 async function withCodexAppServer(projectRoot, callback, { timeoutMs = 60000 } = {}) {
   const root = ensureProjectRoot(projectRoot);
   const codexBin = requireCodexBin();
-  const child = spawn(codexBin, ["app-server", "--stdio"], {
+  const child = spawn(codexBin, ["app-server", "--stdio"], codexSpawnOptions(codexBin, {
     cwd: root,
     env: codexChildEnvironment(codexBin),
     stdio: ["pipe", "pipe", "pipe"]
-  });
+  }));
   let stderr = "";
   child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-16000); });
   const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
@@ -900,4 +901,3 @@ export async function contextParityCheck(projectRoot, expectedFingerprint = null
     limitation: "Runner MCP cannot itself intercept ChatGPT host lifecycle; project/global AGENTS must require bridge lifecycle calls unless WebCodex host gains a pre-prompt integration point."
   };
 }
-

@@ -237,20 +237,32 @@ try {
         throw "installed Context Bridge self-check contract failed"
     }
 
-    $readinessOutput = @(& $node (Join-Path $bridge "readiness.mjs") "--json" "--timeout-ms" "3000")
-    $readinessExit = $LASTEXITCODE
+    $previousCodexBin = [Environment]::GetEnvironmentVariable("CODEX_BIN", "Process")
+    $missingCodex = Join-Path ([System.IO.Path]::GetTempPath()) ("webcodex-missing-codex-{0}.exe" -f [Guid]::NewGuid().ToString("N"))
+    try {
+        $env:CODEX_BIN = $missingCodex
+        $readinessOutput = @(& $node (Join-Path $bridge "readiness.mjs") "--json" "--timeout-ms" "3000")
+        $readinessExit = $LASTEXITCODE
+    } finally {
+        if ($null -eq $previousCodexBin) {
+            Remove-Item Env:CODEX_BIN -ErrorAction SilentlyContinue
+        } else {
+            $env:CODEX_BIN = $previousCodexBin
+        }
+    }
     if ($readinessExit -ne 0 -or $readinessOutput.Count -eq 0) {
         throw "installed Context Bridge readiness failed to execute"
     }
     $readiness = ($readinessOutput -join "`n") | ConvertFrom-Json
-    if (@("ready", "degraded", "unavailable") -notcontains [string]$readiness.status) {
-        throw "installed Context Bridge readiness returned an invalid status"
-    }
     if (
+        [string]$readiness.status -ne "unavailable" -or
+        [string]$readiness.reason -ne "codex_reference_invalid" -or
+        [string]$readiness.owner -ne "codex_reference" -or
+        [string]$readiness.impact -ne "native_context_only" -or
         [string]$readiness.source_version -ne $ContextBridgeVersion -or
         [Int64]$readiness.native_model_turns -ne 0
     ) {
-        throw "installed Context Bridge readiness violated version/zero-quota contract"
+        throw "installed Context Bridge deterministic readiness violated unavailable/zero-quota contract"
     }
     foreach ($field in @("reason", "owner", "impact", "next_action", "observed_at_ms")) {
         if ($null -eq $readiness.$field -or [string]$readiness.$field -eq "") {

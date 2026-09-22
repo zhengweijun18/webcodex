@@ -306,6 +306,13 @@ export function codexChildEnvironment(canonicalPath, baseEnv = process.env) {
   return environment;
 }
 
+export function codexSpawnOptions(canonicalPath, options) {
+  if (process.platform !== "win32" || !/\.(?:cmd|bat)$/i.test(canonicalPath)) {
+    return options;
+  }
+  return { ...options, shell: true, windowsHide: true };
+}
+
 function probeRoot(env) {
   for (const candidate of [
     env.WEBCODEX_PROJECT_ROOT,
@@ -333,11 +340,11 @@ export async function probeCodexReadiness({
   const root = probeRoot(env);
   let child;
   try {
-    child = spawn(resolution.canonical_path, ["app-server", "--stdio"], {
+    child = spawn(resolution.canonical_path, ["app-server", "--stdio"], codexSpawnOptions(resolution.canonical_path, {
       cwd: root,
       env: codexChildEnvironment(resolution.canonical_path, env),
       stdio: ["pipe", "pipe", "pipe"]
-    });
+    }));
   } catch {
     return readinessResult(
       "unavailable",
@@ -464,6 +471,15 @@ async function main() {
   process.stdout.write(JSON.stringify(payload) + "\n");
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   await main();
 }

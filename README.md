@@ -15,6 +15,8 @@ Current validated cross-platform baseline: `acc84e9f87a18af852f9076e63b72e10c8bb
 
 ### Direct downloads
 
+The four platform variants are separate installers. Choose the package for your OS and CPU architecture; do not mix architectures.
+
 Ordinary users do not need to clone the source. Download the enhanced Desktop from
 [GitHub Releases](https://github.com/zhengweijun18/webcodex/releases/latest),
 quit the existing WebCodex Desktop, and install the package matching the machine:

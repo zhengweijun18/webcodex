@@ -102,8 +102,9 @@ async function main() {
     const project = path.join(temp, "project");
     const outside = path.join(temp, "outside.txt");
     const codexHome = path.join(temp, "codex-home");
-    const fakeCodexTarget = path.join(temp, "fake-codex-target");
-    const fakeCodex = path.join(temp, "fake-codex");
+    const commandSuffix = process.platform === "win32" ? ".cmd" : "";
+    const fakeCodexTarget = path.join(temp, `fake-codex-target${commandSuffix}`);
+    const fakeCodex = path.join(temp, `fake-codex${commandSuffix}`);
     const log = path.join(temp, "fake.log");
     fs.mkdirSync(path.join(project, ".skills", "demo"), { recursive: true });
     fs.mkdirSync(path.join(project, "docs"), { recursive: true });
@@ -117,16 +118,22 @@ async function main() {
       profile: "fixture",
       knowledge_paths: { docs: "docs/README.md", escape: "linked.txt" }
     }));
-    fs.writeFileSync(
-      fakeCodexTarget,
-      [
-        "#!/bin/sh",
-        "export WEBCODEX_PROJECT_ROOT=" + JSON.stringify(project),
-        "export FAKE_LOG=" + JSON.stringify(log),
-        "exec " + JSON.stringify(process.execPath) + " " + JSON.stringify(SELF) + ' --fake-app-server "$@"',
-        ""
-      ].join("\n")
-    );
+    const fakeCodexScript = process.platform === "win32"
+      ? [
+          "@echo off",
+          `set "WEBCODEX_PROJECT_ROOT=${project.replaceAll("%", "%%").replaceAll('"', '""')}"`,
+          `set "FAKE_LOG=${log.replaceAll("%", "%%").replaceAll('"', '""')}"`,
+          `"${process.execPath.replaceAll("%", "%%").replaceAll('"', '""')}" "${SELF.replaceAll("%", "%%").replaceAll('"', '""')}" --fake-app-server %*`,
+          ""
+        ]
+      : [
+          "#!/bin/sh",
+          "export WEBCODEX_PROJECT_ROOT=" + JSON.stringify(project),
+          "export FAKE_LOG=" + JSON.stringify(log),
+          "exec " + JSON.stringify(process.execPath) + " " + JSON.stringify(SELF) + ' --fake-app-server "$@"',
+          ""
+        ];
+    fs.writeFileSync(fakeCodexTarget, fakeCodexScript.join("\n"));
     fs.chmodSync(fakeCodexTarget, 0o755);
     fs.symlinkSync(fakeCodexTarget, fakeCodex);
 
@@ -146,6 +153,22 @@ async function main() {
     });
     assert.equal(invalid.status, "unavailable");
     assert.equal(invalid.reason, "codex_reference_invalid");
+    const readinessAlias = path.join(temp, "readiness-alias.mjs");
+    fs.symlinkSync(fileURLToPath(new URL("./readiness.mjs", import.meta.url)), readinessAlias);
+    const readinessCli = spawnSync(
+      process.execPath,
+      [readinessAlias, "--json", "--timeout-ms", "3000"],
+      {
+        env: { ...baseEnv, CODEX_BIN: path.join(temp, "missing-codex") },
+        encoding: "utf8",
+        timeout: 10000
+      }
+    );
+    assert.equal(readinessCli.status, 0, readinessCli.stderr || readinessCli.stdout);
+    const readinessCliPayload = JSON.parse(readinessCli.stdout);
+    assert.equal(readinessCliPayload.status, "unavailable");
+    assert.equal(readinessCliPayload.reason, "codex_reference_invalid");
+    assert.equal(readinessCliPayload.native_model_turns, 0);
     const first = runChild(baseEnv);
     assert.equal(first.bridge_version, "0.5.1");
     assert.equal(first.stale, false);
@@ -182,6 +205,7 @@ async function main() {
       single_process_per_bootstrap: true,
       initialized_notification: true,
       codex_symlink_canonicalized: true,
+      symlinked_readiness_entrypoint: true,
       explicit_invalid_codex_fails_closed: true,
       provider_mcp_probe: true,
       skill_body_changes_fingerprint: true,
