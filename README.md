@@ -93,10 +93,10 @@ The practical difference is that you do **not** need to repeatedly paste the pro
 - **Required capability contract:** 12/12 PASS
 - **Desktop lifecycle regression:** 17/17 PASS
 - **Upstream compatibility rehearsal:** PASS
-- **Bundled Node / Context Bridge:** `v24.21.0` / `0.5.0`, installed-app self-check PASS
+- **Bundled Node / Context Bridge:** `v24.21.0` / `0.5.1`, bundled self-check PASS
 - **Single-install provider registration:** PASS; no manual Node install / Bridge copy / `runner.toml` edit required for the Desktop-owned Runner
 - **Observed Native Codex model turns:** **0**
-- **Source HEAD = installed Desktop = running Server/Runner:** aligned on `6a3f3ea49e9f`
+- **Historical macOS dogfood alignment evidence:** source / installed Desktop / running Server+Runner were aligned on `6a3f3ea49e9f`; current cross-platform source baseline is the commit shown above.
 
 ### Important boundary: what this does *not* claim
 

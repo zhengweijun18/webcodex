@@ -86,7 +86,7 @@ build / test 等长任务交给 Job 持续运行
 
 ### 当前已经真实验证过什么
 
-当前 `6a3f3ea4` 基线不是“文档说支持”，而是有机器验证证据：
+原始 macOS dogfood 的 `6a3f3ea4` 基线有机器验证证据；当前跨平台源码基线以本文顶部标出的 commit 为准：
 
 - **Context Bridge black-box：PASS**
 - **Native Context runtime：8/8 PASS**
@@ -95,10 +95,10 @@ build / test 等长任务交给 Job 持续运行
 - **Required Capability Contract：12/12 PASS**
 - **Desktop lifecycle regression：17/17 PASS**
 - **Upstream compatibility rehearsal：PASS**
-- **Bundled Node / Context Bridge：`v24.21.0` / `0.5.0`，实际安装版 self-check PASS**
+- **Bundled Node / Context Bridge：`v24.21.0` / `0.5.1`，bundled self-check PASS**
 - **Single-Install Provider 自动注册：PASS**；普通 Desktop 用户不需要手工装 Node、复制 Bridge、修改 `runner.toml`
 - **Native Codex model turns：0**
-- **Source HEAD = Installed Desktop = Running Server/Runner：全部对齐到 `6a3f3ea49e9f`**
+- **历史 macOS dogfood 对齐证据：Source / Installed Desktop / Running Server+Runner 曾全部对齐到 `6a3f3ea49e9f`**；当前跨平台源码基线见本文顶部。
 
 ### 哪些能力明确不属于这个 Goal
 
