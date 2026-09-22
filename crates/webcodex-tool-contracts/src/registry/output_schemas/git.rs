@@ -196,6 +196,18 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("failure_kind", nullable_schema("string", "Stable bounded commit rejection/failure kind.")),
             ("hook_policy", schema_type("string", "Always bypassed_exact_tree: commit-tree is used so hooks cannot add unrelated paths.")),
         ])),
+        "git_push" => Some(wrapped_output_schema(vec![
+            ("pushed", nullable_schema("boolean", "True when the remote branch is proven to point at expected_head; null only when dispatch outcome is unknown.")),
+            ("expected_head", schema_type("string", "Exact caller-supplied HEAD fence.")),
+            ("remote", schema_type("string", "Configured Git remote name.")),
+            ("branch", schema_type("string", "Current local branch and destination remote branch.")),
+            ("remote_before", nullable_schema("string", "Remote branch commit before the push, when observed.")),
+            ("remote_after", nullable_schema("string", "Remote branch commit after the push, when observed.")),
+            ("already_up_to_date", schema_type("boolean", "True when the remote already pointed at expected_head before mutation.")),
+            ("state_changed", nullable_schema("boolean", "Whether the remote branch is known to have changed.")),
+            ("outcome_unknown", schema_type("boolean", "True only when Runner dispatch may have executed but no trustworthy terminal result was received.")),
+            ("failure_kind", nullable_schema("string", "Stable bounded push rejection/failure kind.")),
+        ])),
         "git_status" => Some(wrapped_output_schema(vec![
             (
                 "exit_code",

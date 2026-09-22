@@ -132,6 +132,7 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
         name: TOOL_DISCOVERY_GROUP_GIT,
         tools: &[
             "git_commit_paths",
+            "git_push",
             "git_status",
             "git_review_summary",
             "git_diff_hunks",
@@ -457,10 +458,10 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
     },
     ToolRecommendedFlow {
         name: "commit",
-        summary: "Commit: inspect git_status/show_changes, copy show_changes.head.commit into git_commit_paths.expected_head, and pass explicit changed file paths. It rejects pre-existing staged state and never pushes; keep run_process for unusual Git operations outside this narrow contract.",
+        summary: "Commit/push: inspect git_status/show_changes, commit exact paths with git_commit_paths, then use git_push with the resulting exact HEAD, configured remote, and current branch. git_push never force-pushes and exact retries are remote-observing and safe.",
         manifest_purpose:
-            "Commit route: inspect with show_changes, copy head.commit to expected_head, then call git_commit_paths with explicit paths. Requires project:write + job:run because clean filters may run; isolated exact-tree commit bypasses hooks, rejects staged state, never pushes.",
-        tools: &["git_status", "show_changes", "git_commit_paths"],
+            "Commit/push route: inspect with show_changes, commit exact paths with git_commit_paths, then call git_push using the exact resulting HEAD and the current branch. Both require project:write + job:run; push is same-branch, non-force, and fenced.",
+        tools: &["git_status", "show_changes", "git_commit_paths", "git_push"],
     },
     ToolRecommendedFlow {
         name: "review",

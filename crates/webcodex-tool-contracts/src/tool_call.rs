@@ -2110,6 +2110,25 @@ pub enum ToolCall {
         session_id: Option<String>,
     },
 
+    /// Push the current branch HEAD to the same named remote branch without force.
+    GitPush {
+        /// Runner-registered project id.
+        project: String,
+        /// Exact current 40-hex HEAD fence.
+        #[schemars(length(min = 40, max = 40))]
+        #[schemars(regex(pattern = "^[0-9A-Fa-f]{40}$"))]
+        expected_head: String,
+        /// Configured Git remote name, for example origin.
+        #[schemars(length(min = 1, max = 128))]
+        remote: String,
+        /// Current local branch name and destination remote branch name.
+        #[schemars(length(min = 1, max = 255))]
+        branch: String,
+        /// Optional explicit wc_sess_* Workflow Session id from a prior compatible bootstrap.
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
     /// Run `git status` on a project.
     GitStatus {
         /// Configured project id.
@@ -5043,6 +5062,7 @@ impl ToolCall {
             Self::GitRestorePaths { .. } => "git_restore_paths",
             Self::DiscardUntracked { .. } => "discard_untracked",
             Self::GitCommitPaths { .. } => "git_commit_paths",
+            Self::GitPush { .. } => "git_push",
             Self::GitStatus { .. } => "git_status",
             Self::GitDiffHunks { .. } => "git_diff_hunks",
             Self::GitReviewSummary { .. } => "git_review_summary",
@@ -5189,6 +5209,7 @@ impl ToolCall {
             | Self::GitRestorePaths { session_id, .. }
             | Self::DiscardUntracked { session_id, .. }
             | Self::GitCommitPaths { session_id, .. }
+            | Self::GitPush { session_id, .. }
             | Self::GitStatus { session_id, .. }
             | Self::GitDiffHunks { session_id, .. }
             | Self::GitReviewSummary { session_id, .. }
@@ -5336,6 +5357,7 @@ impl ToolCall {
             | Self::GitRestorePaths { project, .. }
             | Self::DiscardUntracked { project, .. }
             | Self::GitCommitPaths { project, .. }
+            | Self::GitPush { project, .. }
             | Self::GitStatus { project, .. }
             | Self::GitDiffHunks { project, .. }
             | Self::GitReviewSummary { project, .. }

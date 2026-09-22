@@ -13,6 +13,8 @@ const GIT_COMMIT_PATHS_MAX_PATHS: usize = 32;
 const GIT_COMMIT_PATH_MAX_CHARS: usize = 512;
 const GIT_COMMIT_MESSAGE_MAX_CHARS: usize = 1000;
 pub(crate) const GIT_COMMIT_RESULT_PREFIX: &str = "@@WEBCODEX_GIT_COMMIT@@";
+const GIT_PUSH_REMOTE_MAX_CHARS: usize = 128;
+const GIT_PUSH_BRANCH_MAX_CHARS: usize = 255;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GitCommitMarker {
@@ -57,6 +59,123 @@ fn validate_git_commit_paths_input(
         return Err("message must not contain NUL".to_string());
     }
     Ok((expected_head, paths, message.to_string()))
+}
+
+fn validate_git_push_input(
+    expected_head: &str,
+    remote: &str,
+    branch: &str,
+) -> Result<(String, String, String), String> {
+    let expected_head = normalize_exact_commit_id(expected_head)
+        .map_err(|_| "expected_head must be one exact 40-hex commit id".to_string())?;
+    let remote = remote.trim();
+    if remote.is_empty() || remote.chars().count() > GIT_PUSH_REMOTE_MAX_CHARS {
+        return Err(format!(
+            "remote must contain 1..={GIT_PUSH_REMOTE_MAX_CHARS} characters"
+        ));
+    }
+    if remote.starts_with('-')
+        || !remote
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(
+            "remote must be a configured Git remote name using only letters, digits, '.', '_' or '-'"
+                .to_string(),
+        );
+    }
+    let branch = branch.trim();
+    if branch.is_empty() || branch.chars().count() > GIT_PUSH_BRANCH_MAX_CHARS {
+        return Err(format!(
+            "branch must contain 1..={GIT_PUSH_BRANCH_MAX_CHARS} characters"
+        ));
+    }
+    if branch.starts_with('-') || branch.chars().any(char::is_control) {
+        return Err("branch is not a valid current-branch candidate".to_string());
+    }
+    Ok((
+        expected_head,
+        remote.to_string(),
+        branch.to_string(),
+    ))
+}
+
+fn process_stdout_tail(result: &ToolResult) -> Option<&str> {
+    result.output.get("stdout_tail")?.as_str()
+}
+
+fn parse_ls_remote_head(result: &ToolResult) -> Result<Option<String>, String> {
+    if !result.success {
+        return Err("remote probe failed".to_string());
+    }
+    let text = process_stdout_tail(result).unwrap_or_default().trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let mut lines = text.lines();
+    let first = lines
+        .next()
+        .ok_or_else(|| "remote probe returned malformed output".to_string())?;
+    if lines.next().is_some() {
+        return Err("remote probe returned multiple refs".to_string());
+    }
+    let sha = first
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| "remote probe returned malformed output".to_string())?;
+    normalize_exact_commit_id(sha)
+        .map(Some)
+        .map_err(|_| "remote probe returned a non-commit object id".to_string())
+}
+
+fn git_push_failure_output(
+    expected_head: &str,
+    remote: &str,
+    branch: &str,
+    remote_before: Option<&str>,
+    remote_after: Option<&str>,
+    failure_kind: &str,
+    state_changed: Option<bool>,
+) -> Value {
+    json!({
+        "pushed": false,
+        "expected_head": expected_head,
+        "remote": remote,
+        "branch": branch,
+        "remote_before": remote_before,
+        "remote_after": remote_after,
+        "already_up_to_date": false,
+        "state_changed": state_changed,
+        "outcome_unknown": false,
+        "failure_kind": failure_kind,
+    })
+}
+
+fn git_push_outcome_unknown(
+    expected_head: &str,
+    remote: &str,
+    branch: &str,
+    remote_before: Option<&str>,
+    reason: &str,
+) -> ToolResult {
+    ToolResult::err_with_output(
+        format!(
+            "git_push outcome is unknown: {reason}. Repeating the exact same git_push input is safe because the tool re-observes the remote branch before mutation."
+        ),
+        json!({
+            "pushed": null,
+            "expected_head": expected_head,
+            "remote": remote,
+            "branch": branch,
+            "remote_before": remote_before,
+            "remote_after": null,
+            "already_up_to_date": false,
+            "state_changed": null,
+            "outcome_unknown": true,
+            "failure_kind": "outcome_unknown",
+        }),
+    )
+    .with_recovery(RecoveryKind::RetrySame)
 }
 
 fn git_commit_paths_script(expected_head: &str, paths: &[String], message: &str) -> String {
@@ -395,5 +514,287 @@ impl ToolRuntime {
                 }
             }
         }
+    }
+
+    pub(crate) async fn git_push(
+        &self,
+        project: String,
+        expected_head: String,
+        remote: String,
+        branch: String,
+    ) -> ToolResult {
+        let (expected_head, remote, branch) =
+            match validate_git_push_input(&expected_head, &remote, &branch) {
+                Ok(values) => values,
+                Err(error) => return ToolResult::err(error),
+            };
+
+        let head = self
+            .run_internal_process_sync(
+                project.clone(),
+                "git".to_string(),
+                vec![
+                    "rev-parse".to_string(),
+                    "--verify".to_string(),
+                    "HEAD".to_string(),
+                ],
+                30,
+            )
+            .await;
+        let actual_head = process_stdout_tail(&head).unwrap_or_default().trim();
+        if !head.success || actual_head != expected_head {
+            return ToolResult::err_with_output(
+                "git_push rejected because current HEAD does not match expected_head",
+                git_push_failure_output(
+                    &expected_head,
+                    &remote,
+                    &branch,
+                    None,
+                    None,
+                    "head_mismatch",
+                    Some(false),
+                ),
+            );
+        }
+
+        let current_branch = self
+            .run_internal_process_sync(
+                project.clone(),
+                "git".to_string(),
+                vec![
+                    "symbolic-ref".to_string(),
+                    "--quiet".to_string(),
+                    "--short".to_string(),
+                    "HEAD".to_string(),
+                ],
+                30,
+            )
+            .await;
+        if !current_branch.success
+            || process_stdout_tail(&current_branch).unwrap_or_default().trim() != branch
+        {
+            return ToolResult::err_with_output(
+                "git_push only supports the current checked-out branch",
+                git_push_failure_output(
+                    &expected_head,
+                    &remote,
+                    &branch,
+                    None,
+                    None,
+                    "branch_mismatch",
+                    Some(false),
+                ),
+            );
+        }
+
+        let branch_check = self
+            .run_internal_process_sync(
+                project.clone(),
+                "git".to_string(),
+                vec![
+                    "check-ref-format".to_string(),
+                    "--branch".to_string(),
+                    branch.clone(),
+                ],
+                30,
+            )
+            .await;
+        if !branch_check.success {
+            return ToolResult::err_with_output(
+                "git_push rejected an invalid branch name",
+                git_push_failure_output(
+                    &expected_head,
+                    &remote,
+                    &branch,
+                    None,
+                    None,
+                    "invalid_branch",
+                    Some(false),
+                ),
+            );
+        }
+
+        let remote_check = self
+            .run_internal_process_sync(
+                project.clone(),
+                "git".to_string(),
+                vec![
+                    "remote".to_string(),
+                    "get-url".to_string(),
+                    remote.clone(),
+                ],
+                30,
+            )
+            .await;
+        if !remote_check.success {
+            return ToolResult::err_with_output(
+                "git_push requires an existing configured Git remote",
+                git_push_failure_output(
+                    &expected_head,
+                    &remote,
+                    &branch,
+                    None,
+                    None,
+                    "remote_not_found",
+                    Some(false),
+                ),
+            );
+        }
+
+        let remote_ref = format!("refs/heads/{branch}");
+        let before_probe = self
+            .run_internal_process_sync(
+                project.clone(),
+                "git".to_string(),
+                vec![
+                    "ls-remote".to_string(),
+                    "--heads".to_string(),
+                    remote.clone(),
+                    remote_ref.clone(),
+                ],
+                60,
+            )
+            .await;
+        let remote_before = match parse_ls_remote_head(&before_probe) {
+            Ok(value) => value,
+            Err(error) => {
+                return ToolResult::err_with_output(
+                    format!("git_push could not observe the remote branch before mutation: {error}"),
+                    git_push_failure_output(
+                        &expected_head,
+                        &remote,
+                        &branch,
+                        None,
+                        None,
+                        "remote_probe_failed",
+                        Some(false),
+                    ),
+                )
+            }
+        };
+        if remote_before.as_deref() == Some(expected_head.as_str()) {
+            return ToolResult::ok(json!({
+                "pushed": true,
+                "expected_head": expected_head,
+                "remote": remote,
+                "branch": branch,
+                "remote_before": remote_before,
+                "remote_after": remote_before,
+                "already_up_to_date": true,
+                "state_changed": false,
+                "outcome_unknown": false,
+                "failure_kind": null,
+            }));
+        }
+
+        let refspec = format!("{expected_head}:{remote_ref}");
+        let push = self
+            .run_internal_process_sync(
+                project.clone(),
+                "git".to_string(),
+                vec![
+                    "push".to_string(),
+                    "--porcelain".to_string(),
+                    remote.clone(),
+                    refspec,
+                ],
+                120,
+            )
+            .await;
+
+        let after_probe = self
+            .run_internal_process_sync(
+                project,
+                "git".to_string(),
+                vec![
+                    "ls-remote".to_string(),
+                    "--heads".to_string(),
+                    remote.clone(),
+                    remote_ref,
+                ],
+                60,
+            )
+            .await;
+        let remote_after = match parse_ls_remote_head(&after_probe) {
+            Ok(value) => value,
+            Err(_) => {
+                return git_push_outcome_unknown(
+                    &expected_head,
+                    &remote,
+                    &branch,
+                    remote_before.as_deref(),
+                    "the push may have been dispatched and the follow-up remote observation failed",
+                )
+            }
+        };
+
+        if remote_after.as_deref() == Some(expected_head.as_str()) {
+            return ToolResult::ok(json!({
+                "pushed": true,
+                "expected_head": expected_head,
+                "remote": remote,
+                "branch": branch,
+                "remote_before": remote_before,
+                "remote_after": remote_after,
+                "already_up_to_date": false,
+                "state_changed": true,
+                "outcome_unknown": false,
+                "failure_kind": null,
+            }));
+        }
+
+        let unchanged = remote_after == remote_before;
+        ToolResult::err_with_output(
+            if push.success {
+                "git_push completed but the remote branch did not resolve to expected_head"
+            } else {
+                "git_push failed and the remote branch does not point to expected_head"
+            },
+            git_push_failure_output(
+                &expected_head,
+                &remote,
+                &branch,
+                remote_before.as_deref(),
+                remote_after.as_deref(),
+                if push.success {
+                    "remote_verification_failed"
+                } else {
+                    "push_failed"
+                },
+                unchanged.then_some(false),
+            ),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_push_input_is_fenced_and_remote_name_is_bounded() {
+        let head = "a".repeat(40);
+        assert_eq!(
+            validate_git_push_input(&head, "origin", "feature/test").unwrap(),
+            (head.clone(), "origin".to_string(), "feature/test".to_string())
+        );
+        assert!(validate_git_push_input(&head, "-force", "main").is_err());
+        assert!(validate_git_push_input(&head, "origin", "-main").is_err());
+        assert!(validate_git_push_input("not-a-sha", "origin", "main").is_err());
+    }
+
+    #[test]
+    fn git_push_remote_probe_parser_accepts_one_exact_head_or_absence() {
+        let head = "b".repeat(40);
+        let present = ToolResult::ok(json!({
+            "stdout_tail": format!("{head}\trefs/heads/main\n")
+        }));
+        assert_eq!(parse_ls_remote_head(&present).unwrap(), Some(head));
+
+        let absent = ToolResult::ok(json!({"stdout_tail": ""}));
+        assert_eq!(parse_ls_remote_head(&absent).unwrap(), None);
+
+        let malformed = ToolResult::ok(json!({"stdout_tail": "not-a-sha\trefs/heads/main\n"}));
+        assert!(parse_ls_remote_head(&malformed).is_err());
     }
 }

@@ -25,6 +25,13 @@ impl ToolRuntime {
                 self.git_commit_paths(project, expected_head, paths, message)
                     .await
             }
+            ToolCall::GitPush {
+                project,
+                expected_head,
+                remote,
+                branch,
+                session_id: _,
+            } => self.git_push(project, expected_head, remote, branch).await,
             ToolCall::GitStatus {
                 project,
                 session_id: _,

@@ -113,6 +113,29 @@ pub(super) const DETAIL_DEFINITIONS: &[ToolDefinition] = &[
         ),
         "Commit exactly requested changed file paths with an atomic expected_head fence and isolated temporary index; normal Git clean filters may run under job:run authority, ordinary commit hooks are bypassed so they cannot add unrelated paths, and the tool never pushes.",
     )), &[PROJECT_WRITE, JOB_RUN]),
+    require_all_scopes(git_like(model_spec(
+        def(
+            "git_push",
+            super::ToolAuditPolicy::TYPED_CANONICAL.drop_null_request_values(),
+            ModelVisible,
+            TOOL_CATEGORY_GIT,
+            Some(GitOrShell),
+            TOOL_PROVIDER_RUNNER,
+            super::ToolSemanticContract {
+                effect: super::ToolEffect::Mutate,
+                risk: ProjectWrite,
+                approval: super::ToolApprovalPolicy::Standard,
+                idempotency: super::ToolIdempotency::FencedReplay,
+            },
+            Some(PROJECT_WRITE),
+            true,
+            NoPath,
+            false,
+            false,
+            super::ToolSessionEvidencePolicy::NONE,
+        ),
+        "Push the exact current HEAD to the same named branch on one configured Git remote. The tool requires an exact expected_head fence, rejects detached/mismatched branches, never force-pushes, never pushes tags or arbitrary refspecs, and re-observes the remote branch so an exact retry is safe after an uncertain response.",
+    )), &[PROJECT_WRITE, JOB_RUN]),
     git_like(model_spec(
         def(
             "git_status",

@@ -2956,6 +2956,7 @@ impl ToolRuntime {
             call @ (ToolCall::GitRestorePaths { .. }
             | ToolCall::DiscardUntracked { .. }
             | ToolCall::GitCommitPaths { .. }
+            | ToolCall::GitPush { .. }
             | ToolCall::GitStatus { .. }
             | ToolCall::GitDiffHunks { .. }
             | ToolCall::GitReviewSummary { .. }

@@ -4076,6 +4076,22 @@ impl ToolCallAuditProjection for ToolCall {
                     "message_present": true,
                 })
             }
+            Self::GitPush {
+                project,
+                expected_head,
+                remote,
+                branch,
+                ..
+            } => {
+                let expected_head = normalized_exact_git_commit_for_audit(expected_head);
+                serde_json::json!({
+                    "project": project,
+                    "expected_head_valid": expected_head.is_some(),
+                    "expected_head": expected_head,
+                    "remote": remote,
+                    "branch": branch,
+                })
+            }
             Self::GitStatus { project, .. } => serde_json::json!({
                 "project": project,
             }),
