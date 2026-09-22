@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+smoke_phase="preflight"
+smoke_finished=0
+report_smoke_failure() {
+  status="$1"
+  if [ "$smoke_finished" -ne 1 ] && [ "$status" -ne 0 ]; then
+    printf '::error title=macOS Desktop smoke::phase=%s status=%s\n' "$smoke_phase" "$status" >&2
+  fi
+}
+
 usage() {
   echo "usage: $0 --dmg <path> --version <version> --source-sha <40hex> --built-at <unix> --platform <darwin-x64|darwin-arm64> --stage-metadata <path> --signing-mode <adhoc|developer-id> [--evidence <path>]" >&2
   exit 2
@@ -38,10 +47,12 @@ case "$platform" in
   *) echo "unsupported Desktop platform: $platform" >&2; exit 1 ;;
 esac
 case "$signing_mode" in adhoc|developer-id) ;; *) echo "invalid signing mode" >&2; exit 1 ;; esac
+smoke_phase="host-and-input"
 [ "$(uname -m)" = "$expected_host" ] || { echo "Desktop smoke requires native $expected_host host" >&2; exit 1; }
 [ -f "$dmg" ] && [ ! -L "$dmg" ] || { echo "DMG is missing or not a regular file: $dmg" >&2; exit 1; }
 [ -f "$stage_metadata" ] && [ ! -L "$stage_metadata" ] || { echo "stage metadata is missing: $stage_metadata" >&2; exit 1; }
 
+smoke_phase="mount-dmg"
 temp_root="$(mktemp -d "${TMPDIR:-/tmp}/webcodex-desktop-macos-smoke.XXXXXX")"
 mount_point="$temp_root/mount"
 mkdir "$mount_point"
@@ -52,7 +63,14 @@ cleanup() {
   fi
   rm -rf -- "$temp_root"
 }
-trap cleanup EXIT INT TERM
+finish_smoke() {
+  status=$?
+  report_smoke_failure "$status"
+  cleanup
+  return "$status"
+}
+trap finish_smoke EXIT
+trap 'exit 130' INT TERM
 
 hdiutil attach -readonly -nobrowse -mountpoint "$mount_point" "$dmg" >/dev/null
 attached=1
@@ -61,6 +79,7 @@ app="$mount_point/WebCodex Desktop.app"
 runtime_dir="$app/Contents/Resources/webcodex-runtime"
 [ -d "$runtime_dir" ] || { echo "bundled WebCodex runtime directory is missing" >&2; exit 1; }
 
+smoke_phase="stage-metadata"
 python3 - "$stage_metadata" "$version" "$source_sha" "$built_at" "$platform" "$signing_mode" <<'PY'
 import json
 import re
@@ -142,6 +161,7 @@ for name, item in bridge["files"].items():
         raise SystemExit(f"malformed bundled Context Bridge file metadata: {name}")
 PY
 
+smoke_phase="bundled-runtime"
 short_source="$(printf '%s' "${source_sha:0:12}" | tr '[:upper:]' '[:lower:]')"
 for name in webcodex webcodex-server webcodex-runner; do
   binary="$runtime_dir/$name"
@@ -153,6 +173,7 @@ for name in webcodex webcodex-server webcodex-runner; do
   [ "$actual_arch" = "$expected_arch" ] || { echo "unexpected bundled runtime architecture for $name: $actual_arch" >&2; exit 1; }
 done
 
+smoke_phase="bundled-tools"
 tools_dir="$app/Contents/Resources/webcodex-tools"
 bundled_node="$tools_dir/node/node"
 bridge_dir="$tools_dir/codex-context-bridge"
@@ -187,6 +208,7 @@ context_bridge_version="$(printf '%s\n' "$bundled_versions" | sed -n '2p')"
   exit 1
 }
 
+smoke_phase="context-bridge-self-check"
 self_check="$("$bundled_node" "$bridge_dir/self-check.mjs")"
 python3 - "$self_check" "$context_bridge_version" <<'PY'
 import json
@@ -201,6 +223,7 @@ if payload.get("native_model_turns") != 0:
     raise SystemExit("bundled Context Bridge self-check started a native model turn")
 PY
 
+smoke_phase="context-bridge-readiness"
 readiness="$("$bundled_node" "$bridge_dir/readiness.mjs" --json --timeout-ms 3000)"
 python3 - "$readiness" "$context_bridge_version" <<'PY'
 import json
@@ -218,6 +241,7 @@ for key in ("reason", "owner", "impact", "next_action", "observed_at_ms"):
         raise SystemExit(f"bundled Context Bridge readiness missing {key}: {payload}")
 PY
 
+smoke_phase="codesign"
 codesign --verify --deep --strict --verbose=2 "$app"
 notarized=false
 if [ "$signing_mode" = developer-id ]; then
@@ -226,6 +250,7 @@ if [ "$signing_mode" = developer-id ]; then
   notarized=true
 fi
 
+smoke_phase="evidence"
 if [ -n "$evidence" ]; then
   mkdir -p "$(dirname "$evidence")"
   python3 - "$stage_metadata" "$runtime_dir" "$dmg" "$platform" "$signing_mode" "$notarized" "$evidence" <<'PY'
@@ -264,4 +289,6 @@ Path(evidence_path).write_text(json.dumps(payload, indent=2) + "\n", encoding="u
 PY
 fi
 
+smoke_phase="complete"
+smoke_finished=1
 echo "macOS Desktop DMG smoke passed: $platform signing=$signing_mode notarized=$notarized"
