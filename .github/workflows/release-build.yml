@@ -446,6 +446,11 @@ jobs:
           else
             desktop_name="webcodex-desktop-$INPUT_TAG-${SOURCE_SHA:0:12}-v$VERSION-$WEBCODEX_RELEASE_PLATFORM.dmg"
           fi
+          tool_cache="$RUNNER_TEMP/webcodex-desktop-$WEBCODEX_RELEASE_PLATFORM-tools"
+          bundled_node="$(bash scripts/prepare_bundled_node_macos.sh \
+            --platform "$WEBCODEX_RELEASE_PLATFORM" \
+            --output-dir "$tool_cache")"
+          context_bridge_version="$(node -p "require('./tooling/tools/codex-context-bridge/package.json').version")"
           python3 scripts/prepare_desktop_bundle_macos.py \
             --bin-dir target/release \
             --version "$VERSION" \
@@ -453,6 +458,10 @@ jobs:
             --built-at "$WEBCODEX_BUILT_AT" \
             --platform "$WEBCODEX_RELEASE_PLATFORM" \
             --signing-mode "$signing_mode" \
+            --node-bin "$bundled_node" \
+            --node-version v24.21.0 \
+            --context-bridge-dir tooling/tools/codex-context-bridge \
+            --context-bridge-version "$context_bridge_version" \
             --output-dir "$stage"
           {
             echo "config=$stage/tauri.bundle.conf.json"
@@ -659,11 +668,24 @@ jobs:
           $ErrorActionPreference = "Stop"
           $binDir = Join-Path "target" (Join-Path $env:RUST_TARGET "release")
           $stage = Join-Path $env:RUNNER_TEMP "webcodex-desktop-$env:WEBCODEX_RELEASE_PLATFORM-release-bundle"
+          $toolCache = Join-Path $env:RUNNER_TEMP "webcodex-desktop-$env:WEBCODEX_RELEASE_PLATFORM-tools"
+          $bundledNode = @(
+            & .\scripts\prepare_bundled_node_windows.ps1 `
+              -Platform $env:WEBCODEX_RELEASE_PLATFORM `
+              -OutputDir $toolCache
+          ) | Select-Object -Last 1
+          if (-not $bundledNode) { throw "bundled Node preparation returned no path" }
+          $contextBridgeVersion = (node -p "require('./tooling/tools/codex-context-bridge/package.json').version").Trim()
           & .\scripts\prepare_desktop_bundle.ps1 `
             -BinDir $binDir `
             -Version $env:VERSION `
             -SourceSha $env:SOURCE_SHA `
             -BuiltAt ([Int64]$env:WEBCODEX_BUILT_AT) `
+            -Platform $env:WEBCODEX_RELEASE_PLATFORM `
+            -NodeBin ([string]$bundledNode) `
+            -NodeVersion "v24.21.0" `
+            -ContextBridgeDir "tooling\tools\codex-context-bridge" `
+            -ContextBridgeVersion $contextBridgeVersion `
             -OutputDir $stage
 
           $shortSource = $env:SOURCE_SHA.Substring(0, 12)
@@ -679,6 +701,7 @@ jobs:
           "DESKTOP_TAURI_TARGET=$tauriTarget" >> $env:GITHUB_ENV
           "DESKTOP_INSTALLER_NAME=$installerName" >> $env:GITHUB_ENV
           "DESKTOP_INSTALLER_PATH=$installerPath" >> $env:GITHUB_ENV
+          "DESKTOP_STAGE_METADATA=$(Join-Path $stage 'desktop-bundle.json')" >> $env:GITHUB_ENV
 
       - name: Build unsigned native Windows Desktop NSIS candidate
         working-directory: apps/desktop
@@ -709,7 +732,8 @@ jobs:
             -Version $env:VERSION `
             -SourceSha $env:SOURCE_SHA `
             -BuiltAt ([Int64]$env:WEBCODEX_BUILT_AT) `
-            -Platform $env:WEBCODEX_RELEASE_PLATFORM
+            -Platform $env:WEBCODEX_RELEASE_PLATFORM `
+            -StageMetadata $env:DESKTOP_STAGE_METADATA
 
       - name: Upload Windows candidate
         uses: actions/upload-artifact@v4

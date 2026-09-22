@@ -148,6 +148,11 @@ class PathRiskFixtureTests(unittest.TestCase):
                 self.assertEqual(result["needs_macos"], "true")
 
     def test_windows_installer_and_npm_package_choose_windows_package_lanes(self) -> None:
+        bundled_node = classify("scripts/prepare_bundled_node_windows.ps1")
+        self.assertEqual(bundled_node["needs_windows_desktop"], "true")
+        self.assertEqual(bundled_node["needs_windows_package"], "false")
+        self.assertEqual(bundled_node["needs_macos"], "false")
+
         desktop = classify("scripts/desktop_install_windows_smoke.ps1")
         self.assertEqual(desktop["needs_windows_desktop"], "true")
         self.assertEqual(desktop["needs_windows_package"], "true")
@@ -164,6 +169,11 @@ class PathRiskFixtureTests(unittest.TestCase):
         self.assertEqual(msi["needs_macos"], "false")
 
     def test_macos_packaging_is_macos_only(self) -> None:
+        bundled_node = classify("scripts/prepare_bundled_node_macos.sh")
+        self.assertEqual(bundled_node["needs_macos"], "true")
+        self.assertEqual(bundled_node["needs_macos_desktop"], "true")
+        self.assertEqual(bundled_node["needs_windows"], "false")
+
         result = classify("scripts/prepare_desktop_bundle_macos.py")
         self.assertEqual(result["needs_macos"], "true")
         self.assertEqual(result["needs_macos_desktop"], "true")

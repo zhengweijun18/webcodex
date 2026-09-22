@@ -155,7 +155,18 @@ def probe(root: Path, capability: str, zero_quota_state: Path | None) -> tuple[b
     if capability == "upstream_compatibility_rehearsal":
         return required_files(root, ("scripts/check_upstream_compat.py",))
     if capability == "reproducible_desktop_candidate":
-        return required_files(root, ("scripts/build_local_desktop_candidate.sh",))
+        return required_files(
+            root,
+            (
+                "scripts/build_local_desktop_candidate.sh",
+                "scripts/prepare_bundled_node_macos.sh",
+                "scripts/prepare_bundled_node_windows.ps1",
+                "scripts/prepare_desktop_bundle_macos.py",
+                "scripts/prepare_desktop_bundle.ps1",
+                "scripts/desktop_install_macos_smoke.sh",
+                "scripts/desktop_install_windows_smoke.ps1",
+            ),
+        )
     if capability == "verified_install_and_rollback":
         return required_files(root, ("scripts/local_desktop_lifecycle.py",))
     if capability == "pinned_vue_toolchain_bootstrap":
@@ -232,18 +243,64 @@ def probe(root: Path, capability: str, zero_quota_state: Path | None) -> tuple[b
                 ),
             ),
         )
+        windows_bundle_ok, windows_bundle_data = contains_any(
+            root,
+            (
+                (
+                    "scripts/prepare_desktop_bundle.ps1",
+                    (
+                        "webcodex-tools/node/node.exe",
+                        "codex-context-bridge",
+                        "ContextBridgeVersion",
+                    ),
+                ),
+                (
+                    "scripts/desktop_install_windows_smoke.ps1",
+                    (
+                        "native_model_turns",
+                        "readiness.mjs",
+                        "StageMetadata",
+                    ),
+                ),
+            ),
+        )
+        macos_bundle_ok, macos_bundle_data = contains_any(
+            root,
+            (
+                (
+                    "scripts/prepare_desktop_bundle_macos.py",
+                    (
+                        "webcodex-tools/node/node",
+                        "codex-context-bridge",
+                        "context_bridge_version",
+                    ),
+                ),
+                (
+                    "scripts/desktop_install_macos_smoke.sh",
+                    (
+                        "native_model_turns",
+                        "readiness.mjs",
+                        "bundled_tools",
+                    ),
+                ),
+            ),
+        )
         return (
             bridge_ok
             and runner_ok
             and desktop_projection_ok
             and desktop_refresh_ok
             and ui_ok
+            and windows_bundle_ok
+            and macos_bundle_ok
         ), {
             "shared_bridge_probe": bridge_data,
             "runner_injection": runner_data,
             "desktop_projection": desktop_projection_data,
             "desktop_refresh": desktop_refresh_data,
             "user_visible_status": ui_data,
+            "windows_bundle": windows_bundle_data,
+            "macos_bundle": macos_bundle_data,
         }
     if capability == "zero_quota_native_context_orchestration":
         runtime_ok, runtime_data = contains_any(

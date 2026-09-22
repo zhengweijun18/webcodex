@@ -84,12 +84,17 @@ Never configure a user-specific absolute bridge path in the Server contract.
 
 The maintained enhanced Desktop packages the default Context Bridge as a
 Desktop resource instead of requiring a user to copy it into Application
-Support or edit `runner.toml` manually. Formal macOS candidates contain:
+Support or edit `runner.toml` manually. The same zero-quota bundle contract
+is enforced for native macOS and Windows Desktop candidates:
 
-- `Contents/Resources/webcodex-tools/node/node` — a pinned official Node
-  runtime whose archive SHA256 is verified during the build;
-- `Contents/Resources/webcodex-tools/codex-context-bridge/` — the vendored
-  Context Bridge source from this exact WebCodex commit.
+- macOS: `Contents/Resources/webcodex-tools/node/node`;
+- Windows: `webcodex-tools/node/node.exe`;
+- both platforms include `webcodex-tools/codex-context-bridge/` from this
+  exact WebCodex commit.
+
+Node is pinned to the same version on every Desktop platform. Native x64 and
+ARM64 builds download the matching official Node archive, verify its pinned
+SHA256 and native architecture, then stage the executable byte-for-byte.
 
 The Desktop passes those two resource locations only to the Desktop-owned
 Runner process. Runner config loading treats them as an optional built-in
@@ -132,11 +137,14 @@ expected Vue Language Server 2.2.12 plus TypeScript 5.9.3 installation. Missing
 or drifted Vue tooling affects only Vue LSP readiness and must not be described
 as a bundled Desktop capability.
 
-The build must run the bundled Bridge `self-check.mjs` and the real
-`readiness.mjs` with the bundled Node, require `native_model_turns = 0`, and
-record the path-free structured readiness result before producing a candidate.
-Build provenance records bundled tool versions, hashes, and that readiness
-observation.
+The build/install validation must run the bundled Bridge `self-check.mjs` and
+the real `readiness.mjs` with the bundled Node, require
+`native_model_turns = 0`, and preserve the same bounded readiness semantics on
+macOS and Windows. macOS local candidate provenance records bundled tool
+versions, hashes, and the readiness observation; formal Windows and macOS
+installer smoke tests independently re-verify the installed Node/Bridge payload
+and zero-quota contract. Windows x64 is covered by the ordinary Desktop CI lane,
+while native Windows ARM64 is covered by the extended/release native lane.
 
 The startup path is intentionally narrow:
 

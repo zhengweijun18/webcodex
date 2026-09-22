@@ -125,11 +125,26 @@ def parse_runtime_version(line: str) -> dict:
     return value
 
 
+def desktop_resource_root(app: Path) -> Path:
+    if platform.system() == "Windows":
+        return app
+    return app / "Contents/Resources"
+
+
+def desktop_runtime_dir(app: Path) -> Path:
+    return desktop_resource_root(app) / "webcodex-runtime"
+
+
+def desktop_tools_dir(app: Path) -> Path:
+    return desktop_resource_root(app) / "webcodex-tools"
+
+
 def installed_runtime(root: Path, app: Path) -> dict:
-    runtime = app / "Contents/Resources/webcodex-runtime"
+    runtime = desktop_runtime_dir(app)
+    suffix = ".exe" if platform.system() == "Windows" else ""
     values = {}
     for name in ("webcodex", "webcodex-server", "webcodex-runner"):
-        binary = runtime / name
+        binary = runtime / f"{name}{suffix}"
         if not binary.is_file():
             raise RuntimeError(f"missing installed runtime binary: {binary}")
         line = run([str(binary), "--version"], cwd=root).stdout.splitlines()[0]
@@ -150,11 +165,15 @@ def installed_runtime(root: Path, app: Path) -> dict:
 
 
 def check_installed_desktop(root: Path, app: Path):
-    if platform.system() != "Darwin":
-        return skipped("installed Desktop check is macOS-only")
+    system = platform.system()
+    if system not in {"Darwin", "Windows"}:
+        return skipped("installed Desktop check is supported on macOS and Windows")
     if not app.is_dir():
         raise RuntimeError(f"installed Desktop is missing: {app}")
-    run(["codesign", "--verify", "--deep", "--strict", str(app)], cwd=root)
+    if system == "Darwin":
+        run(["codesign", "--verify", "--deep", "--strict", str(app)], cwd=root)
+    elif not (app / "WebCodex.exe").is_file():
+        raise RuntimeError(f"installed Desktop executable is missing: {app / 'WebCodex.exe'}")
     identity = installed_runtime(root, app)
     commit = identity["commit"]
     exists = run(
@@ -164,7 +183,7 @@ def check_installed_desktop(root: Path, app: Path):
     )
     if exists.returncode != 0:
         return warning(
-            "installed Desktop is signed and internally aligned, but its source commit is not present locally",
+            "installed Desktop is internally aligned, but its source commit is not present locally",
             identity,
         )
 
@@ -175,7 +194,7 @@ def check_installed_desktop(root: Path, app: Path):
     ).returncode == 0
     if not ancestor:
         return warning(
-            "installed Desktop is signed/aligned but is not an ancestor of current HEAD",
+            "installed Desktop is aligned but is not an ancestor of current HEAD",
             identity,
         )
 
@@ -197,16 +216,17 @@ def check_installed_desktop(root: Path, app: Path):
             identity,
         )
     return passed(
-        "installed Desktop is signed/aligned; newer branch changes are maintenance-only",
+        "installed Desktop is aligned; newer branch changes are maintenance-only",
         identity,
     )
 
 
 def check_installed_enhanced_runtime(root: Path, app: Path):
-    if platform.system() != "Darwin":
-        return skipped("installed enhanced-runtime check is macOS-only")
-    tools = app / "Contents/Resources/webcodex-tools"
-    node = tools / "node/node"
+    system = platform.system()
+    if system not in {"Darwin", "Windows"}:
+        return skipped("installed enhanced-runtime check is supported on macOS and Windows")
+    tools = desktop_tools_dir(app)
+    node = tools / "node" / ("node.exe" if system == "Windows" else "node")
     bridge = tools / "codex-context-bridge"
     required_bridge_files = (
         "bridge-lib.mjs",
@@ -306,8 +326,8 @@ def resolve_commit(root: Path, value: str) -> str | None:
 
 
 def check_deployment_gap(root: Path, app: Path):
-    if platform.system() != "Darwin":
-        return skipped("deployment-gap check is macOS-only")
+    if platform.system() not in {"Darwin", "Windows"}:
+        return skipped("deployment-gap check is supported on macOS and Windows")
     if not app.is_dir():
         raise RuntimeError(f"installed Desktop is missing: {app}")
     identity = installed_runtime(root, app)
@@ -657,11 +677,19 @@ def check_deep(root: Path, vue_root: Path, enabled: bool):
     return passed("deep Vue LSP regression passed")
 
 
+def default_installed_app() -> Path:
+    if platform.system() == "Windows":
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / "WebCodex Desktop"
+    return Path("/Applications/WebCodex Desktop.app")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--origin-url")
-    parser.add_argument("--installed-app", type=Path, default=Path("/Applications/WebCodex Desktop.app"))
+    parser.add_argument("--installed-app", type=Path, default=default_installed_app())
     parser.add_argument(
         "--backup-dir",
         type=Path,

@@ -6,19 +6,49 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$SourceSha,
     [Parameter(Mandatory = $true)][Int64]$BuiltAt,
-    [Parameter(Mandatory = $true)][ValidateSet("win32-x64", "win32-arm64")][string]$Platform
+    [Parameter(Mandatory = $true)][ValidateSet("win32-x64", "win32-arm64")][string]$Platform,
+    [Parameter(Mandatory = $true)][string]$StageMetadata
 )
 
 $ErrorActionPreference = "Stop"
 $Installer = [System.IO.Path]::GetFullPath($Installer)
+$StageMetadata = [System.IO.Path]::GetFullPath($StageMetadata)
 if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
     throw "Desktop installer does not exist: $Installer"
+}
+if (-not (Test-Path -LiteralPath $StageMetadata -PathType Leaf)) {
+    throw "Desktop stage metadata does not exist: $StageMetadata"
 }
 if ($SourceSha -notmatch '^[0-9A-Fa-f]{40}$') {
     throw "SourceSha must be one exact 40-hex Git commit"
 }
 if ($BuiltAt -le 0) {
     throw "BuiltAt must be a positive Unix timestamp"
+}
+
+$metadata = Get-Content -LiteralPath $StageMetadata -Raw | ConvertFrom-Json
+if (
+    $metadata.schema_version -ne 3 -or
+    [string]$metadata.platform -ne $Platform -or
+    [string]$metadata.version -ne $Version -or
+    [string]$metadata.source_sha -ne $SourceSha.ToLowerInvariant() -or
+    [Int64]$metadata.built_at -ne $BuiltAt -or
+    [string]$metadata.resource_dir -ne "resources/webcodex-runtime" -or
+    [string]$metadata.tool_resource_dir -ne "resources/webcodex-tools" -or
+    [string]$metadata.provenance -ne "same_unsigned_runtime_input_before_platform_packaging"
+) {
+    throw "Desktop stage metadata identity/schema mismatch"
+}
+$BundledNodeVersion = [string]$metadata.bundled_tools.node.version
+$ContextBridgeVersion = [string]$metadata.bundled_tools.codex_context_bridge.version
+if (-not $BundledNodeVersion -or -not $ContextBridgeVersion) {
+    throw "Desktop stage metadata is missing bundled tool versions"
+}
+if ([string]$metadata.bundled_tools.node.resource -ne "webcodex-tools/node/node.exe") {
+    throw "Desktop stage metadata has an unexpected bundled Node resource"
+}
+if ([string]$metadata.bundled_tools.codex_context_bridge.resource_dir -ne "webcodex-tools/codex-context-bridge") {
+    throw "Desktop stage metadata has an unexpected Context Bridge resource directory"
 }
 
 function Get-WebCodexUninstallEntry {
@@ -169,8 +199,68 @@ try {
         }
     }
 
+    $toolsDir = Join-Path $installedDir "webcodex-tools"
+    $node = Join-Path $toolsDir "node\node.exe"
+    $bridge = Join-Path $toolsDir "codex-context-bridge"
+    if (-not (Test-Path -LiteralPath $node -PathType Leaf)) {
+        throw "installed bundled Node executable is missing: $node"
+    }
+    if ((Get-PeMachine $node) -ne $expectedDesktopMachine) {
+        throw "installed bundled Node architecture mismatch"
+    }
+    $nodeLine = Get-VersionLine $node "node"
+    if ($nodeLine -ne $BundledNodeVersion) {
+        throw "unexpected installed bundled Node version: '$nodeLine' (expected '$BundledNodeVersion')"
+    }
+    foreach ($name in @("bridge-lib.mjs", "readiness.mjs", "README.md", "package.json", "server.mjs", "self-check.mjs")) {
+        $bridgeFile = Join-Path $bridge $name
+        if (-not (Test-Path -LiteralPath $bridgeFile -PathType Leaf)) {
+            throw "installed Context Bridge file is missing: $bridgeFile"
+        }
+    }
+    $bridgePackage = Get-Content -LiteralPath (Join-Path $bridge "package.json") -Raw | ConvertFrom-Json
+    if ([string]$bridgePackage.version -ne $ContextBridgeVersion) {
+        throw "installed Context Bridge package version mismatch"
+    }
+
+    $selfCheckOutput = @(& $node (Join-Path $bridge "self-check.mjs"))
+    $selfCheckExit = $LASTEXITCODE
+    if ($selfCheckExit -ne 0 -or $selfCheckOutput.Count -eq 0) {
+        throw "installed Context Bridge self-check failed to execute"
+    }
+    $selfCheck = ($selfCheckOutput -join "`n") | ConvertFrom-Json
+    if (
+        [string]$selfCheck.status -ne "pass" -or
+        [string]$selfCheck.bridge_version -ne $ContextBridgeVersion -or
+        [Int64]$selfCheck.native_model_turns -ne 0
+    ) {
+        throw "installed Context Bridge self-check contract failed"
+    }
+
+    $readinessOutput = @(& $node (Join-Path $bridge "readiness.mjs") "--json" "--timeout-ms" "3000")
+    $readinessExit = $LASTEXITCODE
+    if ($readinessExit -ne 0 -or $readinessOutput.Count -eq 0) {
+        throw "installed Context Bridge readiness failed to execute"
+    }
+    $readiness = ($readinessOutput -join "`n") | ConvertFrom-Json
+    if (@("ready", "degraded", "unavailable") -notcontains [string]$readiness.status) {
+        throw "installed Context Bridge readiness returned an invalid status"
+    }
+    if (
+        [string]$readiness.source_version -ne $ContextBridgeVersion -or
+        [Int64]$readiness.native_model_turns -ne 0
+    ) {
+        throw "installed Context Bridge readiness violated version/zero-quota contract"
+    }
+    foreach ($field in @("reason", "owner", "impact", "next_action", "observed_at_ms")) {
+        if ($null -eq $readiness.$field -or [string]$readiness.$field -eq "") {
+            throw "installed Context Bridge readiness is missing $field"
+        }
+    }
+
     Write-Output "Desktop install smoke passed: $installedDir"
     Write-Output "Bundled runtime: $runtimeDir"
+    Write-Output "Bundled Native Context runtime: node=$BundledNodeVersion bridge=$ContextBridgeVersion status=$($readiness.status) native_model_turns=0"
 } finally {
     if ($installed) {
         if (-not $uninstaller) {
@@ -193,9 +283,11 @@ try {
 
             $desktopExe = Join-Path $installedDir "WebCodex.exe"
             $runtimeDir = Join-Path $installedDir "webcodex-runtime"
+            $toolsDir = Join-Path $installedDir "webcodex-tools"
             Wait-Until {
                 -not (Test-Path -LiteralPath $desktopExe) -and
-                -not (Test-Path -LiteralPath $runtimeDir)
+                -not (Test-Path -LiteralPath $runtimeDir) -and
+                -not (Test-Path -LiteralPath $toolsDir)
             } 30 "Desktop installer-owned payload remained after silent uninstall: $installedDir"
 
             if (Test-Path -LiteralPath $installedDir -PathType Container) {

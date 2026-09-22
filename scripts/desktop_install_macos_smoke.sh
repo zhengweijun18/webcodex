@@ -69,8 +69,20 @@ from pathlib import Path
 
 path, version, source, built_at, platform, signing_mode = sys.argv[1:]
 value = json.loads(Path(path).read_text(encoding="utf-8"))
-required = {"schema_version", "platform", "version", "source_sha", "built_at", "signing_mode", "resource_dir", "provenance", "files"}
-if set(value) != required or value.get("schema_version") != 2:
+required = {
+    "schema_version",
+    "platform",
+    "version",
+    "source_sha",
+    "built_at",
+    "signing_mode",
+    "resource_dir",
+    "tool_resource_dir",
+    "provenance",
+    "files",
+    "bundled_tools",
+}
+if set(value) != required or value.get("schema_version") != 3:
     raise SystemExit("unexpected Desktop staging metadata schema")
 if value.get("version") != version or value.get("source_sha") != source.lower():
     raise SystemExit("Desktop staging metadata release identity mismatch")
@@ -78,6 +90,10 @@ if value.get("built_at") != int(built_at) or value.get("platform") != platform o
     raise SystemExit("Desktop staging metadata platform/signing identity mismatch")
 if value.get("provenance") != "same_unsigned_runtime_input_before_platform_signing":
     raise SystemExit("Desktop staging metadata provenance mismatch")
+if value.get("resource_dir") != "resources/webcodex-runtime":
+    raise SystemExit("Desktop staging metadata runtime resource path mismatch")
+if value.get("tool_resource_dir") != "resources/webcodex-tools":
+    raise SystemExit("Desktop staging metadata tool resource path mismatch")
 files = value.get("files")
 if not isinstance(files, dict) or set(files) != {"webcodex", "webcodex-server", "webcodex-runner"}:
     raise SystemExit("Desktop staging metadata runtime set mismatch")
@@ -91,6 +107,39 @@ for name, item in files.items():
             raise SystemExit(f"invalid staged runtime digest: {name}")
     if item["source_sha256"] != item["staged_unsigned_sha256"]:
         raise SystemExit(f"unsigned source/staged digest mismatch: {name}")
+tools = value.get("bundled_tools")
+if not isinstance(tools, dict) or set(tools) != {"node", "codex_context_bridge"}:
+    raise SystemExit("Desktop staging metadata bundled tool set mismatch")
+node = tools["node"]
+if (
+    not isinstance(node, dict)
+    or set(node) != {"version", "sha256", "resource"}
+    or node.get("resource") != "webcodex-tools/node/node"
+    or not isinstance(node.get("version"), str)
+    or not re.fullmatch(r"[0-9a-f]{64}", str(node.get("sha256", "")))
+):
+    raise SystemExit("malformed bundled Node metadata")
+bridge = tools["codex_context_bridge"]
+if (
+    not isinstance(bridge, dict)
+    or set(bridge) != {"version", "resource_dir", "files"}
+    or bridge.get("resource_dir") != "webcodex-tools/codex-context-bridge"
+    or not isinstance(bridge.get("version"), str)
+    or not isinstance(bridge.get("files"), dict)
+):
+    raise SystemExit("malformed bundled Context Bridge metadata")
+required_bridge = {"bridge-lib.mjs", "readiness.mjs", "README.md", "package.json", "server.mjs", "self-check.mjs"}
+if set(bridge["files"]) != required_bridge:
+    raise SystemExit("bundled Context Bridge metadata file set mismatch")
+for name, item in bridge["files"].items():
+    if (
+        not isinstance(item, dict)
+        or set(item) != {"size", "sha256"}
+        or not isinstance(item.get("size"), int)
+        or item["size"] <= 0
+        or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", "")))
+    ):
+        raise SystemExit(f"malformed bundled Context Bridge file metadata: {name}")
 PY
 
 short_source="$(printf '%s' "${source_sha:0:12}" | tr '[:upper:]' '[:lower:]')"
@@ -103,6 +152,71 @@ for name in webcodex webcodex-server webcodex-runner; do
   actual_arch="$(/usr/bin/lipo -archs "$binary")"
   [ "$actual_arch" = "$expected_arch" ] || { echo "unexpected bundled runtime architecture for $name: $actual_arch" >&2; exit 1; }
 done
+
+tools_dir="$app/Contents/Resources/webcodex-tools"
+bundled_node="$tools_dir/node/node"
+bridge_dir="$tools_dir/codex-context-bridge"
+[ -f "$bundled_node" ] && [ ! -L "$bundled_node" ] && [ -x "$bundled_node" ] || {
+  echo "bundled Node executable is missing" >&2
+  exit 1
+}
+for name in bridge-lib.mjs readiness.mjs README.md package.json server.mjs self-check.mjs; do
+  [ -f "$bridge_dir/$name" ] && [ ! -L "$bridge_dir/$name" ] || {
+    echo "bundled Context Bridge file is missing: $name" >&2
+    exit 1
+  }
+done
+
+bundled_versions="$(python3 - "$stage_metadata" <<'PY'
+import json
+import sys
+from pathlib import Path
+value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(value["bundled_tools"]["node"]["version"])
+print(value["bundled_tools"]["codex_context_bridge"]["version"])
+PY
+)"
+bundled_node_version="$(printf '%s\n' "$bundled_versions" | sed -n '1p')"
+context_bridge_version="$(printf '%s\n' "$bundled_versions" | sed -n '2p')"
+[ "$("$bundled_node" --version)" = "$bundled_node_version" ] || {
+  echo "bundled Node version mismatch after DMG install" >&2
+  exit 1
+}
+[ "$(/usr/bin/lipo -archs "$bundled_node")" = "$expected_arch" ] || {
+  echo "bundled Node architecture mismatch after DMG install" >&2
+  exit 1
+}
+
+self_check="$("$bundled_node" "$bridge_dir/self-check.mjs")"
+python3 - "$self_check" "$context_bridge_version" <<'PY'
+import json
+import sys
+payload = json.loads(sys.argv[1])
+expected = sys.argv[2]
+if payload.get("status") != "pass":
+    raise SystemExit(f"bundled Context Bridge self-check failed: {payload}")
+if payload.get("bridge_version") != expected:
+    raise SystemExit("bundled Context Bridge self-check version mismatch")
+if payload.get("native_model_turns") != 0:
+    raise SystemExit("bundled Context Bridge self-check started a native model turn")
+PY
+
+readiness="$("$bundled_node" "$bridge_dir/readiness.mjs" --json --timeout-ms 3000)"
+python3 - "$readiness" "$context_bridge_version" <<'PY'
+import json
+import sys
+payload = json.loads(sys.argv[1])
+expected = sys.argv[2]
+if payload.get("status") not in {"ready", "degraded", "unavailable"}:
+    raise SystemExit(f"bundled Context Bridge readiness returned invalid status: {payload}")
+if payload.get("source_version") != expected:
+    raise SystemExit("bundled Context Bridge readiness version mismatch")
+if payload.get("native_model_turns") != 0:
+    raise SystemExit("bundled Context Bridge readiness started a native model turn")
+for key in ("reason", "owner", "impact", "next_action", "observed_at_ms"):
+    if payload.get(key) in (None, ""):
+        raise SystemExit(f"bundled Context Bridge readiness missing {key}: {payload}")
+PY
 
 codesign --verify --deep --strict --verbose=2 "$app"
 notarized=false

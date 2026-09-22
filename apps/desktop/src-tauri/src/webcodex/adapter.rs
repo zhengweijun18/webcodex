@@ -40,10 +40,16 @@ struct BundledContextBridge {
     directory: PathBuf,
 }
 
+fn bundled_node_path(tools: &Path) -> PathBuf {
+    tools
+        .join("node")
+        .join(if cfg!(windows) { "node.exe" } else { "node" })
+}
+
 impl WebCodexAdapter {
     pub fn new(bundled_runtime_dir: Option<PathBuf>, bundled_tools_dir: Option<PathBuf>) -> Self {
         let bundled_context_bridge = bundled_tools_dir.map(|tools| BundledContextBridge {
-            node: tools.join("node").join("node"),
+            node: bundled_node_path(&tools),
             directory: tools.join("codex-context-bridge"),
         });
         Self {
@@ -1072,6 +1078,9 @@ mod tests {
 
     #[test]
     fn local_runner_advertises_bundled_context_bridge_paths() {
+        let tools = PathBuf::from("app-resources").join("webcodex-tools");
+        let node = bundled_node_path(&tools);
+        let bridge = tools.join("codex-context-bridge");
         let binaries = ResolvedBinaries {
             directory: PathBuf::from("bin"),
             webcodex: PathBuf::from("webcodex"),
@@ -1085,8 +1094,8 @@ mod tests {
             binaries: Some(binaries),
             bundled_runtime_dir: None,
             bundled_context_bridge: Some(BundledContextBridge {
-                node: PathBuf::from("/app/resources/webcodex-tools/node/node"),
-                directory: PathBuf::from("/app/resources/webcodex-tools/codex-context-bridge"),
+                node: node.clone(),
+                directory: bridge.clone(),
             }),
         };
         let command = adapter
@@ -1095,13 +1104,11 @@ mod tests {
         let env: Vec<_> = command.get_envs().collect();
         assert!(env.iter().any(|(name, value)| {
             name.to_str() == Some("WEBCODEX_BUNDLED_CONTEXT_BRIDGE_NODE")
-                && value.and_then(|value| value.to_str())
-                    == Some("/app/resources/webcodex-tools/node/node")
+                && value == &Some(node.as_os_str())
         }));
         assert!(env.iter().any(|(name, value)| {
             name.to_str() == Some("WEBCODEX_BUNDLED_CONTEXT_BRIDGE_DIR")
-                && value.and_then(|value| value.to_str())
-                    == Some("/app/resources/webcodex-tools/codex-context-bridge")
+                && value == &Some(bridge.as_os_str())
         }));
     }
 

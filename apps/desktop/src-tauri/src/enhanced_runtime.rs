@@ -58,13 +58,22 @@ fn bundled_regular_dir(path: &Path) -> bool {
         .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
 }
 
+fn bundled_node_path(tools: &Path) -> PathBuf {
+    tools
+        .join("node")
+        .join(if cfg!(windows) { "node.exe" } else { "node" })
+}
+
 fn package_version(path: &Path) -> Option<String> {
-    let payload: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let payload: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     payload.get("version")?.as_str().map(str::to_string)
 }
 
-fn native_probe(node: &Path, bridge: &Path, bridge_version: &str) -> EnhancedRuntimeComponentSnapshot {
+fn native_probe(
+    node: &Path,
+    bridge: &Path,
+    bridge_version: &str,
+) -> EnhancedRuntimeComponentSnapshot {
     let readiness = bridge.join("readiness.mjs");
     if !bundled_regular_file(&readiness) {
         return component(
@@ -176,7 +185,10 @@ fn vue_lsp_snapshot() -> EnhancedRuntimeComponentSnapshot {
     let server = std::env::var_os("WEBCODEX_VUE_LANGUAGE_SERVER")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| root.as_ref().map(|root| root.join("bin/vue-language-server")));
+        .or_else(|| {
+            root.as_ref()
+                .map(|root| root.join("bin/vue-language-server"))
+        });
     let tsdk = std::env::var_os("WEBCODEX_VUE_TSDK")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -263,7 +275,7 @@ fn vue_lsp_snapshot() -> EnhancedRuntimeComponentSnapshot {
 
 pub(crate) fn snapshot(resource_dir: &Path) -> EnhancedRuntimeSnapshot {
     let tools = resource_dir.join("webcodex-tools");
-    let node = tools.join("node/node");
+    let node = bundled_node_path(&tools);
     let bridge = tools.join("codex-context-bridge");
 
     let node_version = if bundled_regular_file(&node) {
@@ -334,7 +346,11 @@ pub(crate) fn snapshot(resource_dir: &Path) -> EnhancedRuntimeSnapshot {
 
     let native_context =
         if bundled_node.status == "ready" && bundled_context_bridge.status == "ready" {
-            native_probe(&node, &bridge, bridge_version.as_deref().unwrap_or("unknown"))
+            native_probe(
+                &node,
+                &bridge,
+                bridge_version.as_deref().unwrap_or("unknown"),
+            )
         } else if bundled_node.status != "ready" {
             component(
                 "unavailable",

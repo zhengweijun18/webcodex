@@ -270,6 +270,7 @@ def _classify_path(risk: Risk, path: str) -> None:
         return
 
     if path in {
+        "scripts/prepare_bundled_node_windows.ps1",
         "scripts/prepare_desktop_bundle.ps1",
         "scripts/desktop_install_windows_smoke.ps1",
     }:
@@ -281,6 +282,7 @@ def _classify_path(risk: Risk, path: str) -> None:
         _mark_windows_package(risk, "windows-package")
         return
     if path in {
+        "scripts/prepare_bundled_node_macos.sh",
         "scripts/prepare_desktop_bundle_macos.py",
         "scripts/desktop_install_macos_smoke.sh",
     }:

@@ -499,6 +499,11 @@ jobs:
         run: |
           set -euo pipefail
           stage="$RUNNER_TEMP/webcodex-desktop-${{ matrix.platform }}-bundle"
+          tool_cache="$RUNNER_TEMP/webcodex-desktop-${{ matrix.platform }}-tools"
+          bundled_node="$(bash scripts/prepare_bundled_node_macos.sh \
+            --platform "${{ matrix.platform }}" \
+            --output-dir "$tool_cache")"
+          context_bridge_version="$(node -p "require('./tooling/tools/codex-context-bridge/package.json').version")"
           python3 scripts/prepare_desktop_bundle_macos.py \
             --bin-dir target/dogfood \
             --version "${{ steps.desktop_runtime.outputs.version }}" \
@@ -506,6 +511,10 @@ jobs:
             --built-at "${{ steps.desktop_runtime.outputs.built_at }}" \
             --platform "${{ matrix.platform }}" \
             --signing-mode adhoc \
+            --node-bin "$bundled_node" \
+            --node-version v24.21.0 \
+            --context-bridge-dir tooling/tools/codex-context-bridge \
+            --context-bridge-version "$context_bridge_version" \
             --output-dir "$stage"
           {
             echo "config=$stage/tauri.bundle.conf.json"
@@ -710,13 +719,27 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $stage = Join-Path $env:RUNNER_TEMP "webcodex-desktop-ci-bundle"
+          $toolCache = Join-Path $env:RUNNER_TEMP "webcodex-desktop-ci-tools"
+          $bundledNode = @(
+            & .\scripts\prepare_bundled_node_windows.ps1 `
+              -Platform win32-x64 `
+              -OutputDir $toolCache
+          ) | Select-Object -Last 1
+          if (-not $bundledNode) { throw "bundled Node preparation returned no path" }
+          $contextBridgeVersion = (node -p "require('./tooling/tools/codex-context-bridge/package.json').version").Trim()
           & .\scripts\prepare_desktop_bundle.ps1 `
             -BinDir "target\dogfood" `
             -Version "${{ steps.runtime.outputs.version }}" `
             -SourceSha "${{ steps.runtime.outputs.source }}" `
             -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}") `
+            -Platform win32-x64 `
+            -NodeBin ([string]$bundledNode) `
+            -NodeVersion "v24.21.0" `
+            -ContextBridgeDir "tooling\tools\codex-context-bridge" `
+            -ContextBridgeVersion $contextBridgeVersion `
             -OutputDir $stage
           "config=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_OUTPUT
+          "metadata=$(Join-Path $stage 'desktop-bundle.json')" >> $env:GITHUB_OUTPUT
       - name: Build unsigned NSIS installer
         working-directory: apps/desktop
         shell: pwsh
@@ -741,7 +764,8 @@ jobs:
             -Version "${{ steps.runtime.outputs.version }}" `
             -SourceSha "${{ steps.runtime.outputs.source }}" `
             -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}") `
-            -Platform win32-x64
+            -Platform win32-x64 `
+            -StageMetadata "${{ steps.desktop_bundle.outputs.metadata }}"
 
   test-windows:
     needs: [contract, changes, test-windows-core, test-windows-runner, test-windows-package, test-windows-desktop]
