@@ -77,7 +77,7 @@ function Get-FirstOutputLine([string]$Binary, [string[]]$Arguments, [string]$Lab
 
 function Assert-RegularNonReparseFile([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "missing $Label: $Path"
+        throw "missing ${Label}: $Path"
     }
     $item = Get-Item -LiteralPath $Path
     if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {

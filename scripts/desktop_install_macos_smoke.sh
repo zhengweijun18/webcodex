@@ -224,19 +224,31 @@ if payload.get("native_model_turns") != 0:
 PY
 
 smoke_phase="context-bridge-readiness"
-readiness="$("$bundled_node" "$bridge_dir/readiness.mjs" --json --timeout-ms 3000)"
+readiness="$(
+  env -i \
+    HOME="$temp_root/home" \
+    PATH="/usr/bin:/bin" \
+    CODEX_BIN="$temp_root/missing-codex" \
+    "$bundled_node" "$bridge_dir/readiness.mjs" --json --timeout-ms 3000
+)"
 python3 - "$readiness" "$context_bridge_version" <<'PY'
 import json
 import sys
 payload = json.loads(sys.argv[1])
 expected = sys.argv[2]
-if payload.get("status") not in {"ready", "degraded", "unavailable"}:
-    raise SystemExit(f"bundled Context Bridge readiness returned invalid status: {payload}")
+if payload.get("status") != "unavailable":
+    raise SystemExit(f"bundled Context Bridge deterministic readiness returned unexpected status: {payload}")
+if payload.get("reason") != "codex_reference_invalid":
+    raise SystemExit(f"bundled Context Bridge deterministic readiness returned unexpected reason: {payload}")
+if payload.get("owner") != "codex_reference":
+    raise SystemExit(f"bundled Context Bridge deterministic readiness returned unexpected owner: {payload}")
+if payload.get("impact") != "native_context_only":
+    raise SystemExit(f"bundled Context Bridge deterministic readiness returned unexpected impact: {payload}")
 if payload.get("source_version") != expected:
     raise SystemExit("bundled Context Bridge readiness version mismatch")
 if payload.get("native_model_turns") != 0:
     raise SystemExit("bundled Context Bridge readiness started a native model turn")
-for key in ("reason", "owner", "impact", "next_action", "observed_at_ms"):
+for key in ("next_action", "observed_at_ms"):
     if payload.get(key) in (None, ""):
         raise SystemExit(f"bundled Context Bridge readiness missing {key}: {payload}")
 PY
