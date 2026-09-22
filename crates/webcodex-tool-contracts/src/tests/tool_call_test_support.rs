@@ -163,6 +163,8 @@ fn sample_field_value(field: &str) -> Value {
         "base_commit" => json!("a".repeat(40)),
         "head_commit" => json!("b".repeat(40)),
         "expected_head" => json!("a".repeat(40)),
+        "remote" => json!("origin"),
+        "branch" => json!("main"),
         "expected_generation" => json!(1),
         "expected_revision" => json!(format!("sha256:{}", "a".repeat(64))),
         "name" => json!("Private Drop"),

@@ -458,7 +458,7 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
     },
     ToolRecommendedFlow {
         name: "commit",
-        summary: "Commit/push: inspect git_status/show_changes, commit exact paths with git_commit_paths, then use git_push with the resulting exact HEAD, configured remote, and current branch. git_push never force-pushes and exact retries are remote-observing and safe.",
+        summary: "Commit/push: inspect git_status/show_changes, copy show_changes.head.commit into git_commit_paths.expected_head, commit exact paths, then use git_push with the resulting exact HEAD, configured remote, and current branch. git_push never force-pushes and exact retries are remote-observing and safe.",
         manifest_purpose:
             "Commit/push route: inspect with show_changes, commit exact paths with git_commit_paths, then call git_push using the exact resulting HEAD and the current branch. Both require project:write + job:run; push is same-branch, non-force, and fenced.",
         tools: &["git_status", "show_changes", "git_commit_paths", "git_push"],
