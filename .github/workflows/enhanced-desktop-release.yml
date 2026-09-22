@@ -278,22 +278,29 @@ jobs:
           $binDir = Join-Path "target" (Join-Path $env:RUST_TARGET "release")
           $stage = Join-Path $env:RUNNER_TEMP "enhanced-desktop-$env:WEBCODEX_RELEASE_PLATFORM-bundle"
           $toolCache = Join-Path $env:RUNNER_TEMP "enhanced-desktop-$env:WEBCODEX_RELEASE_PLATFORM-tools"
-          $bundledNode = @(& .\scripts\prepare_bundled_node_windows.ps1 -Platform $env:WEBCODEX_RELEASE_PLATFORM -OutputDir $toolCache) | Select-Object -Last 1
-          if (-not $bundledNode) { throw "bundled Node preparation returned no path" }
-          $bridgeVersion = (node -p "require('./tooling/tools/codex-context-bridge/package.json').version").Trim()
-          $args = @{
-            BinDir = $binDir
-            Version = $env:VERSION
-            SourceSha = $env:SOURCE_SHA
-            BuiltAt = [Int64]$env:WEBCODEX_BUILT_AT
-            Platform = $env:WEBCODEX_RELEASE_PLATFORM
-            NodeBin = [string]$bundledNode
-            NodeVersion = "v24.21.0"
-            ContextBridgeDir = "tooling\tools\codex-context-bridge"
-            ContextBridgeVersion = $bridgeVersion
-            OutputDir = $stage
+          try {
+            $bundledNode = @(
+              & .\scripts\prepare_bundled_node_windows.ps1 `
+                -Platform $env:WEBCODEX_RELEASE_PLATFORM `
+                -OutputDir $toolCache
+            ) | Select-Object -Last 1
+            if (-not $bundledNode) { throw "bundled Node preparation returned no path" }
+            $bridgeVersion = (node -p "require('./tooling/tools/codex-context-bridge/package.json').version").Trim()
+            & .\scripts\prepare_desktop_bundle.ps1 `
+              -BinDir $binDir `
+              -Version $env:VERSION `
+              -SourceSha $env:SOURCE_SHA `
+              -BuiltAt ([Int64]$env:WEBCODEX_BUILT_AT) `
+              -Platform $env:WEBCODEX_RELEASE_PLATFORM `
+              -NodeBin ([string]$bundledNode) `
+              -NodeVersion "v24.21.0" `
+              -ContextBridgeDir "tooling\tools\codex-context-bridge" `
+              -ContextBridgeVersion $bridgeVersion `
+              -OutputDir $stage
+          } catch {
+            Write-Output "::error title=Windows Desktop staging::$($_.Exception.Message)"
+            throw
           }
-          & .\scripts\prepare_desktop_bundle.ps1 @args
           $name = "webcodex-desktop-v$env:VERSION-$env:WEBCODEX_RELEASE_PLATFORM-setup.exe"
           $target = Join-Path $env:RUNNER_TEMP "enhanced-desktop-$env:WEBCODEX_RELEASE_PLATFORM-tauri"
           "DESKTOP_TAURI_CONFIG=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_ENV
@@ -324,15 +331,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $args = @{
-            Installer = $env:DESKTOP_INSTALLER_PATH
-            Version = $env:VERSION
-            SourceSha = $env:SOURCE_SHA
-            BuiltAt = [Int64]$env:WEBCODEX_BUILT_AT
-            Platform = $env:WEBCODEX_RELEASE_PLATFORM
-            StageMetadata = $env:DESKTOP_STAGE_METADATA
-          }
-          & .\scripts\desktop_install_windows_smoke.ps1 @args
+          & .\scripts\desktop_install_windows_smoke.ps1 `
+            -Installer $env:DESKTOP_INSTALLER_PATH `
+            -Version $env:VERSION `
+            -SourceSha $env:SOURCE_SHA `
+            -BuiltAt ([Int64]$env:WEBCODEX_BUILT_AT) `
+            -Platform $env:WEBCODEX_RELEASE_PLATFORM `
+            -StageMetadata $env:DESKTOP_STAGE_METADATA
 
       - name: Upload Windows release asset
         uses: actions/upload-artifact@v4
