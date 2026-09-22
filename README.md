@@ -6,6 +6,96 @@
 
 Ask your assistant to inspect a repository, modify code, run tests, use Git, or investigate a failure. Your repository stays on the machine where it already lives; you do not need to move the project into a hosted workspace just to use an AI coding agent.
 
+## This fork: Zero-Quota Native-like Runtime
+
+> **What this fork is for:** make **ChatGPT + WebCodex** behave more like a reliable local coding agent — with project awareness, durable jobs, recoverable workflows, safer real-world effects, native Vue LSP, self-maintaining fork logic, and safe Desktop upgrades — while keeping **Native Codex model usage at zero**.
+
+Enhanced implementation branch: [`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)
+Current validated baseline: `6a3f3ea49e9f34f5919ae69d8f33afd7e76f7c15`
+
+### 15 core capabilities
+
+1. **ChatGPT works on the real local project** — read/search/edit files, inspect Git/diffs, run tests/builds/formatters, use the real local toolchain, and finish work instead of only suggesting code.
+2. **Automatic project understanding** — before work starts, WebCodex can project root and nested `AGENTS.md`, available Skills, Knowledge, Hooks/runtime context, workspace state, and Workflow context so the model does not need the project explained from scratch every time.
+3. **Zero-Quota Codex Runtime Context** — observable Codex Runtime context can be used as a reference without starting a Native Codex model turn and without silently falling back to a Codex agent.
+4. **Pathless Skill / Knowledge contracts** — the model works with Skill names, opaque ids, and semantic Knowledge keys instead of depending on developer-machine absolute paths; duplicate/ambiguous Skills fail closed.
+5. **Durable long-running Jobs** — builds, tests, and other long-running work are not tied to one chat turn; the Job can continue running and remain observable after the conversational turn ends.
+6. **Recoverable Workflow Sessions** — workflow state, validation evidence, and Native Context continuity can survive reconnects/restarts so work can continue from the same real execution state instead of being guessed from scratch.
+7. **No blind replay of real-world effects** — if a push/install/file mutation may already have happened but the response was lost, WebCodex marks the outcome uncertain and checks the real state before retrying; it does not silently replay or retarget another Runner.
+8. **More trustworthy validation** — process completion + exit code are authoritative, so successful silent commands such as `cargo fmt --check` are not left behind as fake unresolved failures.
+9. **Real Vue / frontend LSP** — Vue SFC definition navigation, references, diagnostics, symbols, and a pinned Vue Language Server / TypeScript toolchain are available through the native LSP surface instead of relying only on text search.
+10. **One-shot safe Desktop upgrades** — candidate verification, verified backup, exact App-bundle shutdown, one relaunch, Server/Runner health checks, Last Known Good promotion, and automatic rollback if the candidate is unhealthy.
+11. **Automatic patch-retirement decisions** — local fork patches are not kept forever by habit; WebCodex checks whether upstream truly provides the same behavior before a local capability is allowed to retire.
+12. **Disposable upstream upgrade rehearsal** — upstream changes are rehearsed in temporary worktrees first, so merge/rebase compatibility and capability behavior can be tested without rewriting the real maintenance branch.
+13. **Built-in Doctor health check** — source, installed Desktop, running Server/Runner, rollback backup, Vue toolchain, Zero-Quota evidence, Context Bridge, upstream state, and deployment alignment can be checked mechanically.
+14. **Reproducible Desktop provenance** — every formal Desktop candidate can be traced to the exact source commit, build time, toolchain, runtime binary hashes, codesign result, and dirty/clean state.
+15. **Single-install enhanced runtime** — the macOS Desktop bundle now carries a pinned official Node runtime plus Context Bridge 0.5.0; Desktop-owned Runner registration injects the bundled `codex_context` provider when the user has not explicitly configured one, so ordinary recipients no longer install Node, copy the Bridge, or edit `runner.toml` by hand.
+
+### What using it feels like
+
+```text
+You give ChatGPT a task
+        ↓
+WebCodex opens the real local project
+        ↓
+Project rules / AGENTS / Skills / Knowledge / current workflow state are loaded
+        ↓
+The model inspects code + LSP information
+        ↓
+It edits real files and runs the real local toolchain
+        ↓
+Long builds/tests continue as durable Jobs
+        ↓
+Failures are fixed from real evidence, not guessed
+        ↓
+Validation passes → review / commit / handoff
+```
+
+The practical difference is that you do **not** need to repeatedly paste the project rules, directory structure, toolchain instructions, available Skills, test commands, or "where we left off" into every new turn.
+
+### Compared with ordinary WebCodex
+
+| Added on `vue-lsp-native-main` | What you actually gain |
+|---|---|
+| Zero-Quota Native Context | Reuse observable Codex Runtime context without consuming Native Codex model quota |
+| Automatic project context | The agent starts with project rules, scoped AGENTS, Skills, Knowledge, and current workflow state |
+| Pathless Skills / Knowledge | The model does not need developer-machine absolute filesystem paths |
+| Durable Jobs | Long builds/tests do not disappear when one chat turn ends |
+| Workflow recovery | Reconnect/restart can continue from the real prior execution state |
+| Safer effect handling | Uncertain pushes/installs/mutations are checked before retry instead of blindly replayed |
+| Structured validation | Silent successful commands are recorded as success, not historical fake failures |
+| Native Vue LSP | IDE-like Vue navigation/diagnostics instead of text search alone |
+| Safe Desktop adoption | Verified one-shot upgrade with backup, health check, LKG, and automatic rollback |
+| Self-maintaining fork | Local patches can retire once upstream proves equivalent behavior |
+| Doctor | One command checks source/runtime/deployment/toolchain/rollback/Zero-Quota health |
+| Reproducible provenance | A Desktop `.app` can be traced back to an exact source SHA and toolchain |
+| Single-install enhanced runtime | Install the Desktop app once; bundled Node + Context Bridge are registered automatically without hand-editing Runner config |
+
+### What is already validated
+
+- **Context Bridge black-box:** PASS
+- **Native Context runtime:** 8/8 PASS
+- **Scoped Project Instructions:** PASS
+- **Workflow Native Context continuity:** PASS
+- **Required capability contract:** 12/12 PASS
+- **Desktop lifecycle regression:** 17/17 PASS
+- **Upstream compatibility rehearsal:** PASS
+- **Bundled Node / Context Bridge:** `v24.21.0` / `0.5.0`, installed-app self-check PASS
+- **Single-install provider registration:** PASS; no manual Node install / Bridge copy / `runner.toml` edit required for the Desktop-owned Runner
+- **Observed Native Codex model turns:** **0**
+- **Source HEAD = installed Desktop = running Server/Runner:** aligned on `6a3f3ea49e9f`
+
+### Important boundary: what this does *not* claim
+
+This fork does **not** claim to copy OpenAI's private Codex Host, Codex model reasoning/planning, model-side tool-selection intelligence, hidden/private internal state, or the Native Codex TUI. The target is **observable, testable runtime behavior**, not pretending the private model/Host internals were cloned.
+
+### Handoff package
+
+- [Download `WebCodex-Zero-Quota-6a3f3ea4-macOS-Intel.zip`](deliverables/WebCodex-Zero-Quota-6a3f3ea4-macOS-Intel.zip)
+- [Package notes + SHA256](deliverables/README.md)
+
+**In one sentence:** this fork makes ChatGPT + WebCodex a dependable local development agent that **understands the project, can really execute work, survives long tasks and reconnects, avoids unsafe blind retries, upgrades itself safely, and remains maintainable as upstream evolves — without using Native Codex model quota.**
+
 ## Start using WebCodex
 
 ### Everyday development: full WebCodex (recommended)
