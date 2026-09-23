@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 OFFICIAL_UPSTREAM = "https://github.com/yyjeqhc/webcodex.git"
-DEFAULT_BRANCHES = ("vue-lsp-native", "vue-lsp-native-main")
+DEFAULT_BRANCHES = ("vue-lsp-native-main",)
 RUNTIME_PREFIXES = ("crates/", "apps/", "npm/", "src/", "tooling/")
 RUNTIME_FILES = {"Cargo.toml", "Cargo.lock"}
 

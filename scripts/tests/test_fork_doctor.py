@@ -23,6 +23,32 @@ def load_module(name: str, relative: str):
 doctor = load_module("fork_doctor", "scripts/fork_doctor.py")
 
 
+class ForkDoctorMaintenanceBranchTests(unittest.TestCase):
+    def test_retired_branch_is_not_required(self) -> None:
+        branch = "vue-lsp-native-main"
+        sha = "a" * 40
+        with mock.patch.object(doctor, "git", side_effect=[sha, f"origin/{branch}"]) as git:
+            status, _, data = doctor.check_branches(ROOT, doctor.DEFAULT_BRANCHES)
+        self.assertEqual(status, "passed")
+        self.assertEqual(data, {branch: {"sha": sha, "tracking": f"origin/{branch}"}})
+        self.assertEqual(git.call_args_list, [
+            mock.call(ROOT, "rev-parse", f"refs/heads/{branch}"),
+            mock.call(ROOT, "for-each-ref", "--format=%(upstream:short)", f"refs/heads/{branch}"),
+        ])
+
+    def test_active_branch_must_still_track_origin(self) -> None:
+        with mock.patch.object(doctor, "git", side_effect=["a" * 40, "upstream/main"]):
+            with self.assertRaisesRegex(RuntimeError, "vue-lsp-native-main tracks upstream/main"):
+                doctor.check_branches(ROOT, doctor.DEFAULT_BRANCHES)
+
+    def test_missing_active_branch_still_fails(self) -> None:
+        failure = subprocess.CalledProcessError(128, ["git", "rev-parse"])
+        with mock.patch.object(doctor, "git", side_effect=failure) as git:
+            with self.assertRaises(subprocess.CalledProcessError):
+                doctor.check_branches(ROOT, doctor.DEFAULT_BRANCHES)
+        git.assert_called_once_with(ROOT, "rev-parse", "refs/heads/vue-lsp-native-main")
+
+
 class ForkDoctorEvolutionTests(unittest.TestCase):
     def test_deployment_gap_accepts_runtime_short_sha_for_same_head(self) -> None:
         source = "a" * 40

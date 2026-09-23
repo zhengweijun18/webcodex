@@ -5,9 +5,10 @@ WebCodex's existing read-only semantic-navigation boundary.
 
 ## Supported runtime
 
-- WebCodex base: `v0.4.1` / `f080c8f3ea70e37bd9f17fdd0e1b4c3a3aa330f8`
-- Patch branch: `vue-lsp-native`
-- Latest-main forward-port branch: `vue-lsp-native-main`
+- Original patch baseline (historical): `v0.4.1` / `f080c8f3ea70e37bd9f17fdd0e1b4c3a3aa330f8`
+- Active maintenance branch: `vue-lsp-native-main`
+- Retired patch archive: `archive/vue-lsp-native-20260923` at
+  `3c344ac9069f43b801d34e0702c33a6f409a5a27`
 - Current upstream compatibility is determined by `scripts/fork_doctor.py` and
   `scripts/check_upstream_compat.py`; do not treat this document as a pinned
   upstream SHA ledger.
@@ -28,14 +29,21 @@ Remote layout is fixed as:
 - `upstream` → `https://github.com/yyjeqhc/webcodex.git`
 - `origin` → `https://github.com/zhengweijun18/webcodex.git`
 
-Both maintenance branches use generic names: `vue-lsp-native` and
-`vue-lsp-native-main`.
+Only `vue-lsp-native-main` is actively maintained. The former `vue-lsp-native`
+branch is retired locally and on `origin`. Its complete original commit history
+is preserved by the annotated `archive/vue-lsp-native-20260923` tag, available
+both locally and on `origin`; the tag is an archive, not a release. Archiving
+does not assert that every old patch is equivalent to the current implementation.
+
+`scripts/fork_doctor.py` requires only the active branch and its
+`origin/vue-lsp-native-main` tracking configuration. Historical archive checkouts
+are not active maintenance worktrees.
 
 Before rebasing, require a clean worktree. Then:
 
 ```bash
 git fetch upstream --tags
-git switch vue-lsp-native
+git switch vue-lsp-native-main
 git rebase <new-upstream-ref>
 scripts/check_vue_lsp_patch.sh
 ```
