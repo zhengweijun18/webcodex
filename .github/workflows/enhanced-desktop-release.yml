@@ -158,7 +158,19 @@ jobs:
           set -euo pipefail
           export APPLE_SIGNING_IDENTITY="-"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/enhanced-desktop-$WEBCODEX_RELEASE_PLATFORM-tauri"
-          npm exec tauri -- build --bundles dmg --config "${{ steps.bundle.outputs.config }}" --ci -- --locked
+          build_dmg() {
+            npm exec tauri -- build --bundles dmg --config "${{ steps.bundle.outputs.config }}" --ci -- --locked
+          }
+          if ! build_dmg; then
+            dmg_dir="$CARGO_TARGET_DIR/release/bundle/dmg"
+            case "$dmg_dir" in
+              "$RUNNER_TEMP"/enhanced-desktop-*-tauri/release/bundle/dmg) ;;
+              *) echo "Refusing to clean unexpected DMG retry directory: $dmg_dir" >&2; exit 1 ;;
+            esac
+            echo "::warning title=macOS DMG build::bundle_dmg.sh failed; cleaning its temporary output and retrying once"
+            rm -rf "$dmg_dir"
+            build_dmg
+          fi
           shopt -s nullglob
           candidates=("$CARGO_TARGET_DIR/release/bundle/dmg"/*.dmg)
           test "${#candidates[@]}" -eq 1
