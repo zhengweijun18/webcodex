@@ -420,6 +420,14 @@ def probe(root: Path, capability: str, zero_quota_state: Path | None) -> tuple[b
                     "src/tool_runtime/dispatch.rs",
                     ("ToolCall::NativeHostExecReadonly",),
                 ),
+                (
+                    "crates/webcodex-runner/src/webcodex_runner/config.rs",
+                    (
+                        "is_legacy_managed_context_bridge",
+                        "local-tools/codex-context-bridge/",
+                        "replacing_legacy",
+                    ),
+                ),
             ),
         )
         contract_ok, contract_data = contains_any(

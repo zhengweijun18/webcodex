@@ -171,6 +171,14 @@ not log into, click, scrape, or retain a ChatGPT Web browser/session on the
 user's behalf. Native Codex is reused only through explicit local app-server
 contracts that can be proven to start zero model turns.
 
+Enhanced Desktop also fail-safely migrates the historical WebCodex-managed
+`codex_context` entry that pointed at
+`local-tools/codex-context-bridge/<version>/server.mjs`. When a healthy bundled
+Bridge is present, that legacy managed entry is replaced in the Runner's
+effective configuration so an old local-tools copy cannot shadow a newer
+Desktop bundle. A genuinely operator-defined `codex_context` provider keeps
+explicit priority and is never replaced by this migration rule.
+
 The first executable Native Host lane is `native_host_exec_readonly`:
 
 - it calls Codex app-server `command/exec`, whose protocol contract runs a

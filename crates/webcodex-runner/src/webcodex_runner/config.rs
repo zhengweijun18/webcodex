@@ -1642,14 +1642,30 @@ pub(crate) fn load_config(path: &Path) -> Result<RunnerConfig, String> {
     Ok(cfg)
 }
 
+fn is_legacy_managed_context_bridge(provider: &McpGatewayProviderConfig) -> bool {
+    if provider.id != BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID || provider.args.len() != 1 {
+        return false;
+    }
+    let Some(cwd) = provider.cwd.as_deref() else {
+        return false;
+    };
+    let normalize = |value: &str| value.replace('\\', "/").to_ascii_lowercase();
+    let cwd = normalize(cwd).trim_end_matches('/').to_string();
+    let server = normalize(&provider.args[0]);
+    cwd.contains("/local-tools/codex-context-bridge/") && server == format!("{cwd}/server.mjs")
+}
+
 fn inject_bundled_context_bridge_from_env(config: &mut McpGatewayConfig) -> bool {
     use crate::mcp_gateway::MCP_GATEWAY_MAX_PROVIDERS;
-    if config
+    let existing_context = config
         .providers
         .iter()
-        .any(|provider| provider.id == BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID)
-        || config.providers.len() >= MCP_GATEWAY_MAX_PROVIDERS
-    {
+        .find(|provider| provider.id == BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID);
+    if existing_context.is_some_and(|provider| !is_legacy_managed_context_bridge(provider)) {
+        return false;
+    }
+    let replacing_legacy = existing_context.is_some();
+    if !replacing_legacy && config.providers.len() >= MCP_GATEWAY_MAX_PROVIDERS {
         return false;
     }
     let node = std::env::var_os(BUNDLED_CONTEXT_BRIDGE_NODE_ENV).map(PathBuf::from);
@@ -1741,12 +1757,15 @@ fn inject_bundled_context_bridge(
 ) -> bool {
     use crate::mcp_gateway::MCP_GATEWAY_MAX_PROVIDERS;
 
-    if config
+    let existing_context = config
         .providers
         .iter()
-        .any(|provider| provider.id == BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID)
-        || config.providers.len() >= MCP_GATEWAY_MAX_PROVIDERS
-    {
+        .find(|provider| provider.id == BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID);
+    if existing_context.is_some_and(|provider| !is_legacy_managed_context_bridge(provider)) {
+        return false;
+    }
+    let replacing_legacy = existing_context.is_some();
+    if !replacing_legacy && config.providers.len() >= MCP_GATEWAY_MAX_PROVIDERS {
         return false;
     }
     let (Some(node), Some(bridge_dir), Some(codex)) = (node, bridge_dir, codex) else {
@@ -1815,6 +1834,12 @@ fn inject_bundled_context_bridge(
         if let Some(value) = std::env::var_os(key).filter(|value| !value.is_empty()) {
             env.insert(key.to_string(), value.to_string_lossy().into_owned());
         }
+    }
+
+    if replacing_legacy {
+        config
+            .providers
+            .retain(|provider| provider.id != BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID);
     }
 
     config.providers.push(McpGatewayProviderConfig {
@@ -2521,6 +2546,39 @@ mod mcp_gateway_config_tests {
         assert!(provider.env_from_env.is_empty());
         assert_eq!(provider.timeout_secs, Some(30));
         validate_mcp_gateway_config(&config).unwrap();
+    }
+
+    #[test]
+    fn legacy_managed_context_bridge_is_replaced_by_bundled_default() {
+        let (tmp, node, bridge_dir, codex) = bundled_bridge_fixture();
+        let legacy_dir = tmp
+            .path()
+            .join("local-tools")
+            .join("codex-context-bridge")
+            .join("0.5.0");
+        let mut legacy = provider();
+        legacy.id = BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID.to_string();
+        legacy.name = "Local Codex Context Bridge".to_string();
+        legacy.args = vec![legacy_dir.join("server.mjs").to_string_lossy().into_owned()];
+        legacy.cwd = Some(legacy_dir.to_string_lossy().into_owned());
+        let mut config = McpGatewayConfig {
+            request_timeout_secs: 30,
+            providers: vec![legacy],
+        };
+
+        assert!(inject_bundled_context_bridge(
+            &mut config,
+            Some(node),
+            Some(bridge_dir.clone()),
+            Some(codex),
+        ));
+        assert_eq!(config.providers.len(), 1);
+        assert_eq!(config.providers[0].id, BUNDLED_CONTEXT_BRIDGE_PROVIDER_ID);
+        assert_eq!(config.providers[0].name, "Bundled Codex Context Bridge");
+        assert_eq!(
+            config.providers[0].cwd.as_deref().map(PathBuf::from),
+            Some(bridge_dir.canonicalize().unwrap())
+        );
     }
 
     #[test]
