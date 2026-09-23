@@ -213,7 +213,7 @@ async function main() {
       native_model_turns: 0
     }, null, 2) + "\n");
   } finally {
-    fs.rmSync(temp, { recursive: true, force: true });
+    fs.rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

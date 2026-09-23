@@ -206,9 +206,8 @@ async function probeBundledProvider({ resolution, root, env, deadlineAt }) {
   } finally {
     probeComplete = true;
     pending.clear();
+    await stopChildProcess(child);
     try { rl.close(); } catch {}
-    try { child.stdin.end(); } catch {}
-    try { child.kill("SIGTERM"); } catch {}
   }
 }
 
@@ -311,6 +310,33 @@ export function codexSpawnOptions(canonicalPath, options) {
     return options;
   }
   return { ...options, shell: true, windowsHide: true };
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise(resolve => {
+    let timer;
+    const finish = exited => {
+      child.off("exit", onExit);
+      if (timer) clearTimeout(timer);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    child.once("exit", onExit);
+    timer = setTimeout(
+      () => finish(child.exitCode !== null || child.signalCode !== null),
+      timeoutMs
+    );
+  });
+}
+
+export async function stopChildProcess(child) {
+  try { child.stdin?.end(); } catch {}
+  if (await waitForChildExit(child, 1000)) return;
+  try { child.kill("SIGTERM"); } catch {}
+  if (await waitForChildExit(child, 1000)) return;
+  try { child.kill("SIGKILL"); } catch {}
+  await waitForChildExit(child, 1000);
 }
 
 function probeRoot(env) {
@@ -458,9 +484,8 @@ export async function probeCodexReadiness({
     );
   } finally {
     pending.clear();
+    await stopChildProcess(child);
     try { rl.close(); } catch {}
-    try { child.stdin.end(); } catch {}
-    try { child.kill("SIGTERM"); } catch {}
   }
 }
 

@@ -8,7 +8,8 @@ import {
   BRIDGE_VERSION,
   codexChildEnvironment,
   codexSpawnOptions,
-  resolveCodexExecutable
+  resolveCodexExecutable,
+  stopChildProcess
 } from "./readiness.mjs";
 
 export { BRIDGE_VERSION };
@@ -107,8 +108,8 @@ export async function codexRpc(method, params, { timeoutMs = 12000 } = {}) {
     ]);
     return { initialized, result };
   } finally {
-    try { child.stdin.end(); } catch {}
-    try { child.kill("SIGTERM"); } catch {}
+    await stopChildProcess(child);
+    try { rl.close(); } catch {}
   }
 }
 
@@ -157,9 +158,8 @@ async function withCodexAppServer(projectRoot, callback, { timeoutMs = 60000 } =
     const suffix = stderr.trim() ? `; stderr: ${stderr.trim().slice(-4000)}` : "";
     throw new Error(`${error?.message || String(error)}${suffix}`);
   } finally {
+    await stopChildProcess(child);
     try { rl.close(); } catch {}
-    try { child.stdin.end(); } catch {}
-    try { child.kill("SIGTERM"); } catch {}
   }
 }
 
