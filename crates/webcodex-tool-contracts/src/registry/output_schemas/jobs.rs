@@ -783,6 +783,32 @@ fn observe_jobs_output_schema() -> Value {
 
 pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
     match name {
+        "native_host_exec_readonly" => Some(wrapped_output_schema(vec![
+            ("project", schema_type("string", "Resolved WebCodex Project id.")),
+            ("host_adapter", schema_type("string", "Native host adapter; codex_app_server on success.")),
+            ("method", schema_type("string", "Native Codex app-server method; command/exec on success.")),
+            ("sandbox", json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "type": {"type": "string", "const": "readOnly"},
+                    "network_access": {"type": "boolean", "const": false}
+                },
+                "required": ["type", "network_access"]
+            })),
+            ("cwd", schema_type("string", "Resolved project-relative working directory.")),
+            ("exit_code", nullable_schema("integer", "Native process exit code.")),
+            ("stdout", schema_type("string", "Bounded stdout captured by native Codex command/exec.")),
+            ("stderr", schema_type("string", "Bounded stderr captured by native Codex command/exec.")),
+            ("timeout_ms", schema_type("integer", "Effective bounded native execution timeout in milliseconds.")),
+            ("output_bytes_cap", schema_type("integer", "Native app-server output byte cap.")),
+            ("quota_mode", schema_type("string", "Always zero_codex_model_turn after contract validation.")),
+            ("model_turn_started", schema_type("boolean", "Always false after contract validation.")),
+            ("state_changed", schema_type("boolean", "Always false for the WebCodex workspace contract; process execution is still effectful and approval-gated.")),
+            ("fallback_tool", schema_type("string", "Stable fallback tool name: run_process.")),
+            ("error_kind", schema_type("string", "Stable Native Host guard/provider error code on failure.")),
+            ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
+        ])),
         "run_detached_process" => {
             let mut schema = wrapped_output_schema(vec![
                 ("job_id", schema_type("string", "Stable detached Job id when admitted or recovered.")),

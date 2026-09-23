@@ -3791,6 +3791,27 @@ impl ToolCallAuditProjection for ToolCall {
                 "source_bytes": source.len(),
                 "timeout_ms": timeout_ms,
             }),
+            Self::NativeHostExecReadonly {
+                project,
+                executable,
+                args,
+                timeout_secs,
+                cwd,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "executable_present": !executable.is_empty(),
+                "arg_count": args.len(),
+                "process_summary": process_preview(
+                    executable,
+                    args.iter().map(String::as_str),
+                ),
+                "timeout_secs": timeout_secs,
+                "cwd": cwd,
+                "sandbox": "readOnly",
+                "network_access": false,
+                "quota_mode": "zero_codex_model_turn",
+            }),
             Self::RunProcess {
                 project,
                 executable,

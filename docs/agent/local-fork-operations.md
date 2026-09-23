@@ -163,6 +163,37 @@ After startup discovery, models can stay pathless for the two native context rea
 
 Neither tool broadens authority: Project-read and same-Runner ownership remain required, while the internal Context Bridge dispatch still requires local-MCP authority and exact current provider schema. Neither tool accepts a filesystem path from the model.
 
+### Native-first zero-turn Host Adapter
+
+The maintained target mode now separates the user/model surface from execution
+authority. ChatGPT Web remains the human prompt/answer surface; WebCodex does
+not log into, click, scrape, or retain a ChatGPT Web browser/session on the
+user's behalf. Native Codex is reused only through explicit local app-server
+contracts that can be proven to start zero model turns.
+
+The first executable Native Host lane is `native_host_exec_readonly`:
+
+- it calls Codex app-server `command/exec`, whose protocol contract runs a
+  standalone argv command without creating a thread or turn;
+- WebCodex hard-codes `sandboxPolicy.type = readOnly` and
+  `networkAccess = false`; callers cannot widen either field;
+- cwd is project-relative and must canonicalize back inside the exact Project;
+- output and timeout are bounded;
+- the outer WebCodex contract remains `Execute + JobRun + Standard approval`.
+  A read-only filesystem sandbox does **not** turn an arbitrary executable into
+  a pure observation, so this lane is intentionally not auto-approved as a read;
+- mutation, networked work, durable Jobs, remote execution and recovery remain
+  owned by the existing WebCodex Runtime (`run_process`/Jobs/etc.). If the
+  Native Host is unavailable or its contract drifts, WebCodex fails closed and
+  uses the already validated Runtime fallback rather than starting a Codex
+  model turn.
+
+This changes the fork strategy from "copy every Codex capability" to
+"Native-first when an observable zero-turn contract is stronger, WebCodex
+fallback when its durable/remote/effect semantics are stronger". The existing
+Capability Policy and Patch Retirement machinery remain the authority for
+retiring local implementations when upstream satisfies the same behavior.
+
 This is **workflow-entry orchestration**, not private Host interception. If a
 client never invokes `work_on_project`, WebCodex does not claim to observe or
 intercept that host prompt lifecycle.

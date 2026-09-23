@@ -347,6 +347,124 @@ export async function callNativeMcpEffectful(projectRoot, serverName, toolName, 
   });
 }
 
+const NATIVE_HOST_EXEC_MAX_ARGS = 256;
+const NATIVE_HOST_EXEC_MAX_ARG_BYTES = 8192;
+const NATIVE_HOST_EXEC_MAX_TOTAL_ARG_BYTES = 16 * 1024;
+const NATIVE_HOST_EXEC_DEFAULT_TIMEOUT_MS = 30_000;
+const NATIVE_HOST_EXEC_MAX_TIMEOUT_MS = 5 * 60_000;
+const NATIVE_HOST_EXEC_OUTPUT_CAP_BYTES = 64 * 1024;
+
+function nativeHostExecCommand(executable, args = []) {
+  if (typeof executable !== "string" || !executable || executable.length > 1024 || executable.includes("\0")) {
+    throw new Error("native host executable must be a non-empty bounded string");
+  }
+  if (!Array.isArray(args) || args.length > NATIVE_HOST_EXEC_MAX_ARGS) {
+    throw new Error(`native host args must contain at most ${NATIVE_HOST_EXEC_MAX_ARGS} items`);
+  }
+  const values = [executable, ...args];
+  let totalBytes = 0;
+  for (const value of values) {
+    if (typeof value !== "string" || value.includes("\0")) {
+      throw new Error("native host argv values must be strings without NUL bytes");
+    }
+    const bytes = Buffer.byteLength(value);
+    if (bytes > NATIVE_HOST_EXEC_MAX_ARG_BYTES) {
+      throw new Error(`native host argv item exceeds ${NATIVE_HOST_EXEC_MAX_ARG_BYTES} bytes`);
+    }
+    totalBytes += bytes;
+  }
+  if (totalBytes > NATIVE_HOST_EXEC_MAX_TOTAL_ARG_BYTES) {
+    throw new Error(`native host argv exceeds ${NATIVE_HOST_EXEC_MAX_TOTAL_ARG_BYTES} bytes`);
+  }
+  return values;
+}
+
+function nativeHostExecCwd(projectRoot, requestedCwd) {
+  const root = ensureProjectRoot(projectRoot);
+  const canonicalRoot = fs.realpathSync(root);
+  if (requestedCwd === null || requestedCwd === undefined || requestedCwd === "" || requestedCwd === ".") {
+    return canonicalRoot;
+  }
+  if (typeof requestedCwd !== "string" || requestedCwd.length > 1024 || path.isAbsolute(requestedCwd)) {
+    throw new Error("native host cwd must be a bounded project-relative path");
+  }
+  const candidate = path.resolve(root, requestedCwd);
+  const lexicalInside = candidate === root || candidate.startsWith(root + path.sep);
+  if (!lexicalInside || !fs.existsSync(candidate) || !fs.statSync(candidate).isDirectory()) {
+    throw new Error("native host cwd must resolve to an existing directory inside the project");
+  }
+  const canonical = fs.realpathSync(candidate);
+  const canonicalInside = canonical === canonicalRoot || canonical.startsWith(canonicalRoot + path.sep);
+  if (!canonicalInside) {
+    throw new Error("native host cwd escapes the project after canonicalization");
+  }
+  return canonical;
+}
+
+function nativeHostExecTimeout(value) {
+  if (value === null || value === undefined) return NATIVE_HOST_EXEC_DEFAULT_TIMEOUT_MS;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1) {
+    throw new Error("native host timeout_ms must be a positive integer");
+  }
+  return Math.min(parsed, NATIVE_HOST_EXEC_MAX_TIMEOUT_MS);
+}
+
+/**
+ * Run one literal argv command through Codex app-server's standalone
+ * command/exec contract. The app-server schema explicitly guarantees this
+ * request does not create a thread or turn. WebCodex hard-codes the strict
+ * read-only/no-network sandbox here; callers cannot widen it.
+ *
+ * A read-only filesystem sandbox does not make an arbitrary executable a pure
+ * observation (for example, a process could still attempt process-local side
+ * effects), so the outer WebCodex tool remains an effectful, approval-gated
+ * operation even though its Codex sandbox cannot write the workspace.
+ */
+export async function nativeHostExecReadOnly(projectRoot, {
+  executable,
+  args = [],
+  cwd = null,
+  timeoutMs = null
+} = {}) {
+  const root = ensureProjectRoot(projectRoot);
+  const command = nativeHostExecCommand(executable, args);
+  const resolvedCwd = nativeHostExecCwd(root, cwd);
+  const effectiveTimeoutMs = nativeHostExecTimeout(timeoutMs);
+  return withCodexAppServer(root, async ({ request }) => {
+    const result = await request("command/exec", {
+      command,
+      cwd: resolvedCwd,
+      timeoutMs: effectiveTimeoutMs,
+      outputBytesCap: NATIVE_HOST_EXEC_OUTPUT_CAP_BYTES,
+      sandboxPolicy: {
+        type: "readOnly",
+        networkAccess: false
+      },
+      tty: false,
+      streamStdin: false,
+      streamStdoutStderr: false
+    }, effectiveTimeoutMs + 5_000);
+    return {
+      host_adapter: "codex_app_server",
+      method: "command/exec",
+      sandbox: {
+        type: "readOnly",
+        network_access: false
+      },
+      cwd: path.relative(fs.realpathSync(root), resolvedCwd) || ".",
+      exit_code: Number.isInteger(result?.exitCode) ? result.exitCode : null,
+      stdout: typeof result?.stdout === "string" ? result.stdout : "",
+      stderr: typeof result?.stderr === "string" ? result.stderr : "",
+      timeout_ms: effectiveTimeoutMs,
+      output_bytes_cap: NATIVE_HOST_EXEC_OUTPUT_CAP_BYTES,
+      quota_mode: "zero_codex_model_turn",
+      model_turn_started: false,
+      state_changed: false
+    };
+  }, { timeoutMs: effectiveTimeoutMs + 10_000 });
+}
+
 function permissionProfileFromThreadStart(result) {
   const sandbox = result?.sandbox || null;
   const activePermissionProfile = result?.activePermissionProfile || null;

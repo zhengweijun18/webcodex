@@ -15,6 +15,7 @@ import {
   listNativeHooks,
   listNativeMcpServers,
   listNativeSkills,
+  nativeHostExecReadOnly,
   readNativeSkill,
   resolveProjectKnowledge
 } from "./bridge-lib.mjs";
@@ -145,6 +146,26 @@ const toolDefinitions = [
     }
   },
   {
+    name: "native_host_exec_readonly",
+    description: "Run one literal argv command through native Codex app-server command/exec with a hard-coded readOnly filesystem sandbox and network disabled. This request never starts a Codex thread/model turn. The outer WebCodex tool treats it as effectful and approval-gated because process execution is not equivalent to a pure read.",
+    inputSchema: {
+      type: "object",
+      required: ["executable"],
+      properties: {
+        project_root: { type: "string" },
+        executable: { type: "string", minLength: 1, maxLength: 1024 },
+        args: {
+          type: "array",
+          maxItems: 256,
+          items: { type: "string", maxLength: 8192 }
+        },
+        cwd: { type: ["string", "null"], maxLength: 1024 },
+        timeout_ms: { type: ["integer", "null"], minimum: 1, maximum: 300000 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
     name: "dispatch_hook_event",
     description: "Run enabled trusted/managed native command hooks for one Codex lifecycle event. Never runs untrusted or modified hooks.",
     inputSchema: {
@@ -239,6 +260,13 @@ async function callTool(name, input = {}) {
       return callNativeMcpReadOnly(root(input), input.server, input.tool, input.arguments || {});
     case "call_native_mcp_effectful":
       return callNativeMcpEffectful(root(input), input.server, input.tool, input.arguments || {});
+    case "native_host_exec_readonly":
+      return nativeHostExecReadOnly(root(input), {
+        executable: input.executable,
+        args: input.args || [],
+        cwd: input.cwd ?? null,
+        timeoutMs: input.timeout_ms ?? null
+      });
     case "dispatch_hook_event":
       return dispatchHookEvent(root(input), input.event_name, input.payload || {});
     case "resolve_project_knowledge":
@@ -274,7 +302,7 @@ rl.on("line", async line => {
           protocolVersion: request.params?.protocolVersion || "2025-06-18",
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "webcodex-codex-context-bridge", version: BRIDGE_VERSION },
-          instructions: "Use bootstrap_context at WebCodex session start/resume, then read_user_agents when the user-level AGENTS body is not already retained. Route against native_skills.catalog and load only the matching SKILL.md with read_native_skill. For native Codex-managed MCP/Plugin capabilities, search with search_native_mcp_tools, inspect exact arguments with describe_native_mcp_tool, then call read-only tools through call_native_mcp_readonly or effectful-but-non-destructive tools through call_native_mcp_effectful. Destructive tools remain unavailable on the generic bridge. None of these paths starts a Codex model turn. Never use Codex ACP/turn/prompt execution in zero-quota target mode. A non-essential provider/probe that times out or is unavailable must not block the task: record the degraded capability and use an already validated fallback instead of repeating the same long call. Run userPromptSubmit before acting on each new user coding prompt; run subagentStart only when the task explicitly calls for subagent work; run sessionEnd only on a real session close."
+          instructions: "Use bootstrap_context at WebCodex session start/resume, then read_user_agents when the user-level AGENTS body is not already retained. Route against native_skills.catalog and load only the matching SKILL.md with read_native_skill. For native Codex-managed MCP/Plugin capabilities, search with search_native_mcp_tools, inspect exact arguments with describe_native_mcp_tool, then call read-only tools through call_native_mcp_readonly or effectful-but-non-destructive tools through call_native_mcp_effectful. native_host_exec_readonly is the Native-first standalone execution lane: it uses Codex app-server command/exec without a thread/turn, hard-codes readOnly filesystem sandboxing and disables network; the outer WebCodex contract still treats process execution as effectful and approval-gated. Destructive generic MCP tools remain unavailable. None of these paths starts a Codex model turn. Never use Codex ACP/turn/prompt execution in zero-quota target mode. Never automate or scrape a ChatGPT Web browser/session from this bridge. A non-essential provider/probe that times out or is unavailable must not block the task: record the degraded capability and use an already validated fallback instead of repeating the same long call. Run userPromptSubmit before acting on each new user coding prompt; run subagentStart only when the task explicitly calls for subagent work; run sessionEnd only on a real session close."
         }
       });
     } else if (request.method === "ping") {

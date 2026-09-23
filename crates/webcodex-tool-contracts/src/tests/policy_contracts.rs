@@ -572,6 +572,11 @@ fn required_runner_capability_matches_metadata_risk_table() {
             RunnerCapabilityRequirement::StructuredProcess,
         ),
         (
+            "native_host_exec_readonly",
+            ToolRisk::JobRun,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
             "run_skill_resource",
             ToolRisk::JobRun,
             RunnerCapabilityRequirement::SkillResourceExecution,

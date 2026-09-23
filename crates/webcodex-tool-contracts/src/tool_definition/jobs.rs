@@ -1,5 +1,6 @@
 use super::RunnerCapabilityRequirement::{
-    AsyncJobs, DetachedProcess, PersistentShell, Shell, StructuredProcess, StructuredScript,
+    AsyncJobs, DetachedProcess, OwnerOnly, PersistentShell, Shell, StructuredProcess,
+    StructuredScript,
 };
 use super::ToolVisibility::{ModelHidden, ModelVisible};
 use super::{
@@ -52,6 +53,55 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
             super::ToolExecutionContinuation::ObserveJobs,
         )),
         70,
+    ),
+    adaptive_runtime_direct(
+        model_spec(
+            def(
+                "native_host_exec_readonly",
+                super::ToolAuditPolicy::typed_fields(&[
+                    super::ToolAuditResultField::value("project"),
+                    super::ToolAuditResultField::value("host_adapter"),
+                    super::ToolAuditResultField::value("method"),
+                    super::ToolAuditResultField::value("sandbox"),
+                    super::ToolAuditResultField::value("cwd"),
+                    super::ToolAuditResultField::value("exit_code"),
+                    super::ToolAuditResultField::value("timeout_ms"),
+                    super::ToolAuditResultField::value("output_bytes_cap"),
+                    super::ToolAuditResultField::value("quota_mode"),
+                    super::ToolAuditResultField::value("model_turn_started"),
+                    super::ToolAuditResultField::value("state_changed"),
+                ])
+                .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&[
+                    "executable",
+                    "args",
+                ])),
+                ModelVisible,
+                TOOL_CATEGORY_JOB,
+                Some(OwnerOnly),
+                TOOL_PROVIDER_RUNNER,
+                super::ToolSemanticContract {
+                    effect: super::ToolEffect::Execute,
+                    risk: JobRun,
+                    approval: super::ToolApprovalPolicy::Standard,
+                    idempotency: super::ToolIdempotency::NonIdempotent,
+                },
+                Some(JOB_RUN),
+                true,
+                NoPath,
+                true,
+                true,
+                super::ToolSessionEvidencePolicy::NONE,
+            ),
+            "Run one literal argv command through the same Runner's native Codex app-server command/exec contract. Codex hard-enforces a readOnly filesystem sandbox with network disabled and starts no thread/model turn. Because process execution can have non-filesystem side effects, this remains approval-gated and must not be treated as a pure read. Use ordinary WebCodex run_process for mutations, durable execution, networked work, or when the Native Host is unavailable.",
+        )
+        .with_gpt_action_description("Use native Codex command/exec only when its readOnly/no-network sandbox semantics are specifically useful. It is synchronous, approval-gated, zero-model-turn, and has no Job continuation; use run_process for normal or durable execution.")
+        .with_execution(super::ToolExecutionContract::new(
+            super::ToolExecutionForm::NativeArgv,
+            super::ToolExecutionLifetime::Runner,
+            super::ToolExecutionStart::SyncFirst,
+            super::ToolExecutionContinuation::None,
+        )),
+        69,
     ),
     adaptive_runtime_direct(
         require_all_scopes(

@@ -64,6 +64,22 @@ async function fakeAppServer() {
             activePermissionProfile: {}
           });
           break;
+        case "command/exec":
+          assert.deepEqual(message.params?.command, ["git", "status", "--short"]);
+          assert.equal(message.params?.cwd, fs.realpathSync(root));
+          assert.deepEqual(message.params?.sandboxPolicy, {
+            type: "readOnly",
+            networkAccess: false
+          });
+          assert.equal(message.params?.tty, false);
+          assert.equal(message.params?.streamStdin, false);
+          assert.equal(message.params?.streamStdoutStderr, false);
+          reply(message.id, {
+            exitCode: 0,
+            stdout: "native-host-ok\n",
+            stderr: ""
+          });
+          break;
         default:
           process.stdout.write(JSON.stringify({
             id: message.id,
@@ -85,8 +101,30 @@ async function contractChild() {
   process.stdout.write(JSON.stringify(result) + "\n");
 }
 
+async function nativeHostChild() {
+  const bridge = await import("./bridge-lib.mjs?native-host-pid=" + process.pid);
+  const result = await bridge.nativeHostExecReadOnly(process.env.WEBCODEX_PROJECT_ROOT, {
+    executable: "git",
+    args: ["status", "--short"],
+    cwd: ".",
+    timeoutMs: 3000
+  });
+  process.stdout.write(JSON.stringify(result) + "\n");
+}
+
 function runChild(env) {
   const child = spawnSync(process.execPath, [SELF, "--contract-child"], {
+    env,
+    encoding: "utf8",
+    timeout: 20000
+  });
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+  const lines = child.stdout.trim().split("\n").filter(Boolean);
+  return JSON.parse(lines.at(-1));
+}
+
+function runNativeHostChild(env) {
+  const child = spawnSync(process.execPath, [SELF, "--native-host-child"], {
     env,
     encoding: "utf8",
     timeout: 20000
@@ -170,7 +208,7 @@ async function main() {
     assert.equal(readinessCliPayload.reason, "codex_reference_invalid");
     assert.equal(readinessCliPayload.native_model_turns, 0);
     const first = runChild(baseEnv);
-    assert.equal(first.bridge_version, "0.5.1");
+    assert.equal(first.bridge_version, "0.6.0");
     assert.equal(first.stale, false);
     assert.match(first.fingerprint, /^sha256:[a-f0-9]{64}$/);
     const escape = first.knowledge.entries.find(entry => entry.key === "escape");
@@ -192,6 +230,21 @@ async function main() {
     assert.equal(methods.filter(line => line.startsWith("start:")).length, 2);
     assert.equal(methods.filter(line => line === "method:initialized").length, 2);
 
+    const nativeHost = runNativeHostChild(baseEnv);
+    assert.equal(nativeHost.host_adapter, "codex_app_server");
+    assert.equal(nativeHost.method, "command/exec");
+    assert.deepEqual(nativeHost.sandbox, { type: "readOnly", network_access: false });
+    assert.equal(nativeHost.cwd, ".");
+    assert.equal(nativeHost.exit_code, 0);
+    assert.equal(nativeHost.stdout, "native-host-ok\n");
+    assert.equal(nativeHost.stderr, "");
+    assert.equal(nativeHost.quota_mode, "zero_codex_model_turn");
+    assert.equal(nativeHost.model_turn_started, false);
+    assert.equal(nativeHost.state_changed, false);
+    methods = fs.readFileSync(log, "utf8").trim().split("\n");
+    assert.equal(methods.filter(line => line === "method:command/exec").length, 1);
+    assert.equal(methods.filter(line => line === "method:thread/start").length, 2);
+
     const readiness = await probeCodexReadiness({ env: baseEnv, timeoutMs: 3000 });
     assert.equal(readiness.status, "ready", JSON.stringify(readiness));
     assert.equal(readiness.native_model_turns, 0);
@@ -208,6 +261,7 @@ async function main() {
       symlinked_readiness_entrypoint: true,
       explicit_invalid_codex_fails_closed: true,
       provider_mcp_probe: true,
+      native_host_command_exec_readonly: true,
       skill_body_changes_fingerprint: true,
       symlink_metadata_escape_blocked: true,
       native_model_turns: 0
@@ -221,6 +275,8 @@ if (process.argv.includes("--fake-app-server")) {
   await fakeAppServer();
 } else if (process.argv.includes("--contract-child")) {
   await contractChild();
+} else if (process.argv.includes("--native-host-child")) {
+  await nativeHostChild();
 } else {
   await main();
 }

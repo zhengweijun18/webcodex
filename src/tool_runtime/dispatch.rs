@@ -1200,6 +1200,12 @@ impl ToolRuntime {
                     executable,
                     args.iter().map(String::as_str),
                 )),
+                ToolCall::NativeHostExecReadonly {
+                    executable, args, ..
+                } => Some(crate::runner_http::process_preview(
+                    executable,
+                    args.iter().map(String::as_str),
+                )),
                 ToolCall::RunSkillResource {
                     skill_id,
                     path,
@@ -2055,6 +2061,26 @@ impl ToolRuntime {
 
             call @ (ToolCall::ApplyPatch { .. } | ToolCall::ApplyUnifiedDiff { .. }) => {
                 self.dispatch_patch_tool(call).await
+            }
+
+            ToolCall::NativeHostExecReadonly {
+                executable,
+                args,
+                timeout_secs,
+                cwd,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err(
+                            "native_host_exec_readonly requires a resolved Project",
+                        )
+                    }
+                };
+                self.native_host_exec_readonly(&project, executable, args, cwd, timeout_secs, auth)
+                    .await
             }
 
             ToolCall::RunSkillResource {

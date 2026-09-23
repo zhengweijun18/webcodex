@@ -1720,6 +1720,36 @@ pub enum ToolCall {
         purpose: Option<ExecutionPurpose>,
     },
 
+    /// Execute one literal argv command through the native Codex app-server
+    /// standalone command/exec contract. WebCodex hard-codes a read-only
+    /// filesystem sandbox with network disabled; the call never creates a
+    /// Codex thread/model turn. Process execution remains effectful and approval-gated.
+    NativeHostExecReadonly {
+        /// Configured project id.
+        project: String,
+        /// Executable name or path passed as literal argv[0].
+        #[schemars(length(min = 1, max = 1024))]
+        executable: String,
+        /// Ordered literal argv values.
+        #[schemars(length(max = 256))]
+        #[schemars(inner(length(max = 8192)))]
+        #[serde(default)]
+        args: Vec<String>,
+        /// Optional explicit Workflow Session for audit/continuity.
+        #[serde(default)]
+        session_id: Option<String>,
+        /// Total standalone execution timeout in seconds. Defaults to 30 and
+        /// values above 300 are accepted and runtime-clamped to 300.
+        #[schemars(extend("default" = 30))]
+        #[schemars(range(min = 1))]
+        #[serde(default)]
+        timeout_secs: Option<u64>,
+        /// Project-relative working directory; omit, empty string, or '.' for project root.
+        #[schemars(length(max = 1024))]
+        #[serde(default)]
+        cwd: Option<String>,
+    },
+
     /// Admit one native executable + argv as an explicitly detached durable Job.
     /// The detached supervisor owns the accepted payload tree; ordinary
     /// RunProcess remains unchanged.
@@ -5046,6 +5076,7 @@ impl ToolCall {
             #[cfg(feature = "experimental-code-mode")]
             Self::CodeModeExecMutating { .. } => "code_mode_exec_mutating",
             Self::RunProcess { .. } => "run_process",
+            Self::NativeHostExecReadonly { .. } => "native_host_exec_readonly",
             Self::RunDetachedProcess { .. } => "run_detached_process",
             Self::CodingAgentStart { .. } => "coding_agent_start",
             Self::CodingAgentObserve { .. } => "coding_agent_observe",
@@ -5200,6 +5231,7 @@ impl ToolCall {
             | Self::CodeModeExecEffectful { session_id, .. }
             | Self::CodeModeExecMutating { session_id, .. } => Some(session_id.as_str()),
             Self::RunProcess { session_id, .. }
+            | Self::NativeHostExecReadonly { session_id, .. }
             | Self::RunDetachedProcess { session_id, .. }
             | Self::RunScript { session_id, .. }
             | Self::RunShell { session_id, .. }
@@ -5313,6 +5345,7 @@ impl ToolCall {
     ) -> Self {
         match &mut self {
             Self::RunProcess { cwd, .. }
+            | Self::NativeHostExecReadonly { cwd, .. }
             | Self::RunDetachedProcess { cwd, .. }
             | Self::RunScript { cwd, .. }
             | Self::RunSkillResource { cwd, .. }
@@ -5342,6 +5375,7 @@ impl ToolCall {
             | Self::CodeModeExecEffectful { project, .. }
             | Self::CodeModeExecMutating { project, .. } => Some(project.as_str()),
             Self::RunProcess { project, .. }
+            | Self::NativeHostExecReadonly { project, .. }
             | Self::RunDetachedProcess { project, .. }
             | Self::CodingAgentStart { project, .. }
             | Self::StartAgentTaskCodingRun { project, .. }

@@ -381,6 +381,80 @@ def probe(root: Path, capability: str, zero_quota_state: Path | None) -> tuple[b
             "contract": contract_data,
             "model_surface": model_data,
         }
+    if capability == "native_first_zero_turn_host_execution":
+        bridge_ok, bridge_data = contains_any(
+            root,
+            (
+                (
+                    "tooling/tools/codex-context-bridge/bridge-lib.mjs",
+                    (
+                        "nativeHostExecReadOnly",
+                        '"command/exec"',
+                        'type: "readOnly"',
+                        "networkAccess: false",
+                        '"zero_codex_model_turn"',
+                    ),
+                ),
+                (
+                    "tooling/tools/codex-context-bridge/self-check.mjs",
+                    (
+                        "native_host_command_exec_readonly",
+                        '"method:command/exec"',
+                        "native_model_turns",
+                    ),
+                ),
+            ),
+        )
+        runtime_ok, runtime_data = contains_any(
+            root,
+            (
+                (
+                    "src/tool_runtime/native_context.rs",
+                    (
+                        "native_host_exec_readonly",
+                        "native_host_contract_drift",
+                        "zero_codex_model_turn",
+                    ),
+                ),
+                (
+                    "src/tool_runtime/dispatch.rs",
+                    ("ToolCall::NativeHostExecReadonly",),
+                ),
+            ),
+        )
+        contract_ok, contract_data = contains_any(
+            root,
+            (
+                (
+                    "crates/webcodex-tool-contracts/src/tool_definition/jobs.rs",
+                    (
+                        '"native_host_exec_readonly"',
+                        "OwnerOnly",
+                        "ToolEffect::Execute",
+                        "ToolApprovalPolicy::Standard",
+                    ),
+                ),
+                (
+                    "crates/webcodex-tool-contracts/src/tool_call.rs",
+                    ("NativeHostExecReadonly",),
+                ),
+            ),
+        )
+        browser_boundary_ok, browser_boundary_data = contains_any(
+            root,
+            (
+                (
+                    "tooling/tools/codex-context-bridge/server.mjs",
+                    ("Never automate or scrape a ChatGPT Web browser/session",),
+                ),
+            ),
+        )
+        return bridge_ok and runtime_ok and contract_ok and browser_boundary_ok, {
+            "bridge": bridge_data,
+            "runtime": runtime_data,
+            "contract": contract_data,
+            "browser_session_boundary": browser_boundary_data,
+        }
     if capability == "behavioral_native_context_conformance":
         script = root / "scripts/check_behavioral_capabilities.py"
         if not script.is_file():

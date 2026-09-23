@@ -1,6 +1,6 @@
 {
   "name": "webcodex-codex-context-bridge",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {

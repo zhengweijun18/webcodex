@@ -18,6 +18,7 @@ const NATIVE_CONTEXT_TOOL: &str = "bootstrap_context";
 const NATIVE_SKILL_LIST_TOOL: &str = "list_native_skills";
 const NATIVE_SKILL_READ_TOOL: &str = "read_native_skill";
 const NATIVE_KNOWLEDGE_RESOLVE_TOOL: &str = "resolve_project_knowledge";
+const NATIVE_HOST_EXEC_TOOL: &str = "native_host_exec_readonly";
 const MAX_NATIVE_SKILL_TEXT_BYTES: usize = 48 * 1024;
 const MAX_NATIVE_SKILL_CANDIDATES: usize = 8;
 const MAX_NATIVE_KNOWLEDGE_KEYS: usize = 32;
@@ -290,6 +291,80 @@ impl ToolRuntime {
             "has_more": output.get("has_more"),
             "next_start_line": output.get("next_start_line"),
             "state_changed": false,
+        }))
+    }
+
+    pub(crate) async fn native_host_exec_readonly(
+        &self,
+        project: &ResolvedProject,
+        executable: String,
+        args: Vec<String>,
+        cwd: Option<String>,
+        timeout_secs: Option<u64>,
+        auth: Option<&AuthContext>,
+    ) -> ToolResult {
+        if executable.is_empty() || executable.contains('\0') {
+            return native_context_tool_error(
+                &project.resolved_id,
+                "native_host_invalid_executable",
+                None,
+            );
+        }
+        let effective_timeout_secs = timeout_secs.unwrap_or(30).clamp(1, 300);
+        let raw = match self
+            .call_native_context_bridge(
+                project,
+                NATIVE_HOST_EXEC_TOOL,
+                json!({
+                    "project_root": project.config.path,
+                    "executable": executable,
+                    "args": args,
+                    "cwd": cwd,
+                    "timeout_ms": effective_timeout_secs.saturating_mul(1000),
+                }),
+                auth,
+            )
+            .await
+        {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+
+        let zero_quota = raw.get("quota_mode").and_then(Value::as_str)
+            == Some("zero_codex_model_turn")
+            && raw.get("model_turn_started").and_then(Value::as_bool) == Some(false);
+        let sandbox_is_read_only = raw.pointer("/sandbox/type").and_then(Value::as_str)
+            == Some("readOnly")
+            && raw
+                .pointer("/sandbox/network_access")
+                .and_then(Value::as_bool)
+                == Some(false);
+        if !zero_quota
+            || !sandbox_is_read_only
+            || raw.get("method").and_then(Value::as_str) != Some("command/exec")
+        {
+            return native_context_tool_error(
+                &project.resolved_id,
+                "native_host_contract_drift",
+                None,
+            );
+        }
+
+        ToolResult::ok(json!({
+            "project": project.resolved_id,
+            "host_adapter": raw.get("host_adapter"),
+            "method": raw.get("method"),
+            "sandbox": raw.get("sandbox"),
+            "cwd": raw.get("cwd"),
+            "exit_code": raw.get("exit_code"),
+            "stdout": raw.get("stdout").and_then(Value::as_str).unwrap_or_default(),
+            "stderr": raw.get("stderr").and_then(Value::as_str).unwrap_or_default(),
+            "timeout_ms": raw.get("timeout_ms"),
+            "output_bytes_cap": raw.get("output_bytes_cap"),
+            "quota_mode": "zero_codex_model_turn",
+            "model_turn_started": false,
+            "state_changed": false,
+            "fallback_tool": "run_process",
         }))
     }
 

@@ -7,6 +7,8 @@
     "explicit_irreversible_boundary": "required",
     "upstream_first": "required",
     "generic_fork_identity": "required",
+    "native_first_zero_turn_host_reuse": "required",
+    "chatgpt_web_browser_session_automation": "forbidden",
     "host_private_lifecycle_intercept_claimed": "forbidden"
   },
   "capabilities": [
@@ -66,6 +68,11 @@
       "description": "Model-visible native_skill_load and native_knowledge_load use only Skill name/opaque id or semantic knowledge key; native filesystem paths stay internal, duplicate Skill names fail closed, knowledge entries stay inside the Project, and all Bridge calls remain same-Runner schema-bound zero-quota reads."
     },
     {
+      "id": "native_first_zero_turn_host_execution",
+      "required": true,
+      "description": "WebCodex can reuse native Codex app-server command/exec as an explicit Native-first Host Adapter lane without creating a thread/model turn. The lane hard-codes readOnly filesystem sandboxing and network disabled, remains effectful plus approval-gated, and leaves mutations/durable/networked execution on the existing WebCodex Runtime fallback. The bridge must not automate or scrape a ChatGPT Web browser/session."
+    },
+    {
       "id": "behavioral_native_context_conformance",
       "required": true,
       "description": "Executable black-box evidence verifies the vendored zero-quota Context Bridge contract instead of accepting source-token presence as proof."
@@ -109,6 +116,8 @@
         "crates/webcodex-tool-contracts/src/tests/output_schemas.rs",
         "crates/webcodex-tool-contracts/src/tests/policy_contracts.rs",
         "crates/webcodex-tool-contracts/src/tool_call.rs",
+        "crates/webcodex-tool-contracts/src/tool_definition/jobs.rs",
+        "crates/webcodex-tool-contracts/src/registry/output_schemas/jobs.rs",
         "crates/webcodex-tool-contracts/src/tool_definition/skills.rs",
         "crates/webcodex-tool-runtime-contracts/src/tool_audit.rs",
         "crates/webcodex-workflow-session/src/model.rs",
