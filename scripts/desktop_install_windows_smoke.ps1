@@ -146,6 +146,20 @@ function Wait-Until([scriptblock]$Condition, [int]$Seconds, [string]$Failure) {
     throw $Failure
 }
 
+function Remove-FileWithRetry([string]$Path, [int]$Seconds, [string]$Failure) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+    do {
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+        } catch {
+            # NSIS and antivirus scanners can retain a transient Windows file lock.
+        }
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw $Failure
+}
+
 if (Get-WebCodexUninstallEntry) {
     throw "refusing Desktop installer smoke because WebCodex Desktop is already installed for this user"
 }
@@ -285,8 +299,8 @@ try {
             }
             # NSIS normally copies the uninstaller to a temporary directory and exits the
             # original process. `_?=$INSTDIR` keeps the real uninstall in this process so
-            # `-Wait` is authoritative; the harness then removes only the now-unlocked
-            # uninstaller that this NSIS wait mode intentionally cannot self-delete.
+            # `-Wait` is authoritative; the harness then waits through any transient file
+            # lock before removing the uninstaller that this mode cannot self-delete.
             $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList "/S _?=$installedDir" -Wait -PassThru
             if ($uninstallProcess.ExitCode -ne 0) {
                 throw "Desktop silent uninstall failed with exit code $($uninstallProcess.ExitCode)"
@@ -311,7 +325,7 @@ try {
                     throw "Desktop installer-owned files remained after silent uninstall: $($remaining.Name -join ', ')"
                 }
                 if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
-                    Remove-Item -LiteralPath $uninstaller -Force
+                    Remove-FileWithRetry $uninstaller 30 "WebCodex uninstaller remained locked after silent uninstall: $uninstaller"
                 }
                 Remove-Item -LiteralPath $installedDir -Force
             }
