@@ -11,7 +11,7 @@ Ask your assistant to inspect a repository, modify code, run tests, use Git, or 
 > **What this fork is for:** make **ChatGPT + WebCodex** behave more like a reliable local coding agent — with project awareness, durable jobs, recoverable workflows, safer real-world effects, native Vue LSP, self-maintaining fork logic, and safe Desktop upgrades — while keeping **Native Codex model usage at zero**.
 
 Enhanced implementation branch: [`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)
-Current validated cross-platform baseline: `acc84e9f87a18af852f9076e63b72e10c8bb6c0e`
+Current validated cross-platform release: [GitHub Releases (latest)](https://github.com/zhengweijun18/webcodex/releases/latest)
 
 ### Direct downloads
 
@@ -21,10 +21,10 @@ Ordinary users do not need to clone the source. Download the enhanced Desktop fr
 [GitHub Releases](https://github.com/zhengweijun18/webcodex/releases/latest),
 quit the existing WebCodex Desktop, and install the package matching the machine:
 
-- macOS Apple Silicon: `darwin-arm64.dmg`
-- macOS Intel: `darwin-x64.dmg`
-- Windows x64: `win32-x64-setup.exe`
-- Windows ARM64: `win32-arm64-setup.exe`
+- macOS Apple Silicon: `webcodex-desktop-v0.4.2-darwin-arm64.dmg`
+- macOS Intel: `webcodex-desktop-v0.4.2-darwin-x64.dmg`
+- Windows x64: `webcodex-desktop-v0.4.2-win32-x64-setup.exe`
+- Windows ARM64: `webcodex-desktop-v0.4.2-win32-arm64-setup.exe`
 
 The installer already contains the bundled Node runtime and Context Bridge; existing WebCodex user data is retained.
 

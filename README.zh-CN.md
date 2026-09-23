@@ -11,7 +11,7 @@
 > **一句话先说清楚：**这套 Fork 是为了让 **ChatGPT + WebCodex 更像一个可靠的本地开发 Agent**——它能自动理解项目、真正操作本机代码、跑长任务、断线后继续、安全处理真实副作用、使用 Vue LSP、自己判断补丁何时可以退休，还能安全升级 Desktop；同时 **Native Codex 模型调用保持为 0**。
 
 增强实现分支：[`vue-lsp-native-main`](https://github.com/zhengweijun18/webcodex/tree/vue-lsp-native-main)
-当前已验证跨平台基线：`acc84e9f87a18af852f9076e63b72e10c8bb6c0e`
+当前已验证跨平台版本：[GitHub Releases（最新版）](https://github.com/zhengweijun18/webcodex/releases/latest)
 
 ### 直接下载安装
 
@@ -21,10 +21,10 @@
 [GitHub Releases](https://github.com/zhengweijun18/webcodex/releases/latest)
 下载增强版 Desktop，退出原 WebCodex Desktop 后覆盖安装即可：
 
-- macOS Apple Silicon：`darwin-arm64.dmg`
-- macOS Intel：`darwin-x64.dmg`
-- Windows x64：`win32-x64-setup.exe`
-- Windows ARM64：`win32-arm64-setup.exe`
+- macOS Apple Silicon：`webcodex-desktop-v0.4.2-darwin-arm64.dmg`
+- macOS Intel：`webcodex-desktop-v0.4.2-darwin-x64.dmg`
+- Windows x64：`webcodex-desktop-v0.4.2-win32-x64-setup.exe`
+- Windows ARM64：`webcodex-desktop-v0.4.2-win32-arm64-setup.exe`
 
 安装包已经内置增强运行时所需的 Node 与 Context Bridge，原有 WebCodex 用户配置继续保留。
 
