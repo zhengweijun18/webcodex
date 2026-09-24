@@ -2495,6 +2495,25 @@ pub enum ToolCall {
         session_id: Option<String>,
     },
 
+    /// Search the complete native Codex Skill catalog discovered by the same Runner.
+    NativeSkillList {
+        #[schemars(length(min = 1))]
+        project: String,
+        /// Optional case-insensitive substring across name, description, scope, and plugin id.
+        #[schemars(length(max = 256))]
+        #[serde(default)]
+        query: Option<String>,
+        /// Zero-based result offset.
+        #[serde(default)]
+        offset: Option<usize>,
+        /// Maximum returned entries. Defaults to 20 and is runtime-clamped to 100.
+        #[schemars(range(min = 1))]
+        #[serde(default)]
+        limit: Option<usize>,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
     /// Load one native Codex Skill discovered by the same Runner's Context Bridge without exposing native paths.
     NativeSkillLoad {
         #[schemars(length(min = 1))]
@@ -2506,6 +2525,14 @@ pub enum ToolCall {
         #[schemars(regex(pattern = "^wc_nskill_[A-Za-z0-9_-]{22}$"))]
         #[serde(default)]
         native_skill_id: Option<String>,
+        /// Optional 1-based line offset for pathless SKILL.md continuation.
+        #[schemars(range(min = 1))]
+        #[serde(default)]
+        start_line: Option<usize>,
+        /// Optional maximum returned lines. Defaults to 200 and is runtime-clamped to 400.
+        #[schemars(range(min = 1, max = 400))]
+        #[serde(default)]
+        limit: Option<usize>,
         #[serde(default)]
         session_id: Option<String>,
     },
@@ -2523,6 +2550,87 @@ pub enum ToolCall {
         start_line: Option<usize>,
         /// Optional maximum returned lines; bounded to the normal read-files limit.
         #[schemars(range(min = 1, max = 400))]
+        #[serde(default)]
+        limit: Option<usize>,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    /// Search native Codex-managed MCP/Plugin tools visible to the same Runner.
+    NativeMcpSearch {
+        #[schemars(length(min = 1))]
+        project: String,
+        #[schemars(length(max = 500))]
+        #[serde(default)]
+        query: Option<String>,
+        #[schemars(length(max = 256))]
+        #[serde(default)]
+        server: Option<String>,
+        /// Defaults to true; false includes explicitly non-destructive effectful tools.
+        #[serde(default)]
+        read_only_only: Option<bool>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[schemars(range(min = 1))]
+        #[serde(default)]
+        limit: Option<usize>,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    /// Describe one exact native Codex-managed MCP/Plugin tool and its live input schema.
+    NativeMcpDescribe {
+        #[schemars(length(min = 1))]
+        project: String,
+        #[schemars(length(min = 1, max = 256))]
+        server: String,
+        #[schemars(length(min = 1, max = 256))]
+        tool: String,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    /// Call one native MCP/Plugin tool only when native Codex marks it read-only and non-destructive.
+    NativeMcpCallReadonly {
+        #[schemars(length(min = 1))]
+        project: String,
+        #[schemars(length(min = 1, max = 256))]
+        server: String,
+        #[schemars(length(min = 1, max = 256))]
+        tool: String,
+        #[serde(default)]
+        arguments: BTreeMap<String, Value>,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    /// Call one native MCP/Plugin tool only when native Codex marks it effectful and non-destructive.
+    NativeMcpCallEffectful {
+        #[schemars(length(min = 1))]
+        project: String,
+        #[schemars(length(min = 1, max = 256))]
+        server: String,
+        #[schemars(length(min = 1, max = 256))]
+        tool: String,
+        #[serde(default)]
+        arguments: BTreeMap<String, Value>,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
+    /// Read canonical native Codex thread metadata plus one path-safe page of recent thread items.
+    NativeThreadRead {
+        #[schemars(length(min = 1))]
+        project: String,
+        /// Exact/prefix native thread id or exact thread name.
+        #[schemars(length(min = 1, max = 256))]
+        session: String,
+        /// Opaque item pagination cursor from a prior call.
+        #[schemars(length(max = 2048))]
+        #[serde(default)]
+        cursor: Option<String>,
+        /// Maximum items. Defaults to 20 and is runtime-clamped to 50.
+        #[schemars(range(min = 1))]
         #[serde(default)]
         limit: Option<usize>,
         #[serde(default)]
@@ -5104,8 +5212,14 @@ impl ToolCall {
             Self::GoTest { .. } => "go_test",
             Self::ReadFiles { .. } => "read_files",
             Self::SkillLoad { .. } => "skill_load",
+            Self::NativeSkillList { .. } => "native_skill_list",
             Self::NativeSkillLoad { .. } => "native_skill_load",
             Self::NativeKnowledgeLoad { .. } => "native_knowledge_load",
+            Self::NativeMcpSearch { .. } => "native_mcp_search",
+            Self::NativeMcpDescribe { .. } => "native_mcp_describe",
+            Self::NativeMcpCallReadonly { .. } => "native_mcp_call_readonly",
+            Self::NativeMcpCallEffectful { .. } => "native_mcp_call_effectful",
+            Self::NativeThreadRead { .. } => "native_thread_read",
             Self::RunSkillResource { .. } => "run_skill_resource",
             Self::SkillList { .. } => "skill_list",
             Self::SkillReadFile { .. } => "skill_read_file",
@@ -5252,8 +5366,14 @@ impl ToolCall {
             | Self::GoTest { session_id, .. }
             | Self::ReadFiles { session_id, .. }
             | Self::SkillLoad { session_id, .. }
+            | Self::NativeSkillList { session_id, .. }
             | Self::NativeSkillLoad { session_id, .. }
             | Self::NativeKnowledgeLoad { session_id, .. }
+            | Self::NativeMcpSearch { session_id, .. }
+            | Self::NativeMcpDescribe { session_id, .. }
+            | Self::NativeMcpCallReadonly { session_id, .. }
+            | Self::NativeMcpCallEffectful { session_id, .. }
+            | Self::NativeThreadRead { session_id, .. }
             | Self::RunSkillResource { session_id, .. }
             | Self::SkillList { session_id, .. }
             | Self::SkillReadFile { session_id, .. }
@@ -5402,8 +5522,14 @@ impl ToolCall {
             | Self::GoTest { project, .. }
             | Self::ReadFiles { project, .. }
             | Self::SkillLoad { project, .. }
+            | Self::NativeSkillList { project, .. }
             | Self::NativeSkillLoad { project, .. }
             | Self::NativeKnowledgeLoad { project, .. }
+            | Self::NativeMcpSearch { project, .. }
+            | Self::NativeMcpDescribe { project, .. }
+            | Self::NativeMcpCallReadonly { project, .. }
+            | Self::NativeMcpCallEffectful { project, .. }
+            | Self::NativeThreadRead { project, .. }
             | Self::RunSkillResource { project, .. }
             | Self::SkillList { project, .. }
             | Self::SkillReadFile { project, .. }

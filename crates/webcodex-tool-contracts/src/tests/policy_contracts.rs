@@ -762,12 +762,42 @@ fn required_runner_capability_matches_metadata_risk_table() {
             RunnerCapabilityRequirement::FileRead,
         ),
         (
+            "native_skill_list",
+            ToolRisk::Read,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
             "native_skill_load",
             ToolRisk::Read,
             RunnerCapabilityRequirement::OwnerOnly,
         ),
         (
             "native_knowledge_load",
+            ToolRisk::Read,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
+            "native_mcp_search",
+            ToolRisk::Read,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
+            "native_mcp_describe",
+            ToolRisk::Read,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
+            "native_mcp_call_readonly",
+            ToolRisk::Read,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
+            "native_mcp_call_effectful",
+            ToolRisk::JobRun,
+            RunnerCapabilityRequirement::OwnerOnly,
+        ),
+        (
+            "native_thread_read",
             ToolRisk::Read,
             RunnerCapabilityRequirement::OwnerOnly,
         ),

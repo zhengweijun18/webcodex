@@ -2129,9 +2129,28 @@ impl ToolRuntime {
                 self.skill_load(&project, name, auth).await
             }
 
+            ToolCall::NativeSkillList {
+                query,
+                offset,
+                limit,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err("native_skill_list requires a resolved Project")
+                    }
+                };
+                self.native_skill_list(&project, query, offset, limit, auth)
+                    .await
+            }
+
             ToolCall::NativeSkillLoad {
                 name,
                 native_skill_id,
+                start_line,
+                limit,
                 ..
             } => {
                 let project = match project_resolution {
@@ -2141,7 +2160,7 @@ impl ToolRuntime {
                         return ToolResult::err("native_skill_load requires a resolved Project")
                     }
                 };
-                self.native_skill_load(&project, name, native_skill_id, auth)
+                self.native_skill_load(&project, name, native_skill_id, start_line, limit, auth)
                     .await
             }
 
@@ -2159,6 +2178,91 @@ impl ToolRuntime {
                     }
                 };
                 self.native_knowledge_load(&project, key, start_line, limit, auth)
+                    .await
+            }
+
+            ToolCall::NativeMcpSearch {
+                query,
+                server,
+                read_only_only,
+                offset,
+                limit,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err("native_mcp_search requires a resolved Project")
+                    }
+                };
+                self.native_mcp_search(&project, query, server, read_only_only, offset, limit, auth)
+                    .await
+            }
+
+            ToolCall::NativeMcpDescribe { server, tool, .. } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err("native_mcp_describe requires a resolved Project")
+                    }
+                };
+                self.native_mcp_describe(&project, server, tool, auth).await
+            }
+
+            ToolCall::NativeMcpCallReadonly {
+                server,
+                tool,
+                arguments,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err(
+                            "native_mcp_call_readonly requires a resolved Project",
+                        )
+                    }
+                };
+                self.native_mcp_call(&project, server, tool, arguments, false, auth)
+                    .await
+            }
+
+            ToolCall::NativeMcpCallEffectful {
+                server,
+                tool,
+                arguments,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err(
+                            "native_mcp_call_effectful requires a resolved Project",
+                        )
+                    }
+                };
+                self.native_mcp_call(&project, server, tool, arguments, true, auth)
+                    .await
+            }
+
+            ToolCall::NativeThreadRead {
+                session,
+                cursor,
+                limit,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err("native_thread_read requires a resolved Project")
+                    }
+                };
+                self.native_thread_read(&project, session, cursor, limit, auth)
                     .await
             }
 

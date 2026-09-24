@@ -92,10 +92,10 @@ The practical difference is that you do **not** need to repeatedly paste the pro
 - **Native Context runtime:** 8/8 PASS
 - **Scoped Project Instructions:** PASS
 - **Workflow Native Context continuity:** PASS
-- **Required capability contract:** 12/12 PASS
+- **Required capability contract:** 16/16 PASS
 - **Desktop lifecycle regression:** 17/17 PASS
 - **Upstream compatibility rehearsal:** PASS
-- **Bundled Node / Context Bridge:** `v24.21.0` / `0.5.1`, bundled self-check PASS
+- **Context Bridge source:** `0.6.1`, self-check PASS; the last published bundled Node / Context Bridge baseline remains `v24.21.0` / `0.5.1`
 - **Single-install provider registration:** PASS; no manual Node install / Bridge copy / `runner.toml` edit required for the Desktop-owned Runner
 - **Observed Native Codex model turns:** **0**
 - **Historical macOS dogfood alignment evidence:** source / installed Desktop / running Server+Runner were aligned on `6a3f3ea49e9f`; current cross-platform source baseline is the commit shown above.

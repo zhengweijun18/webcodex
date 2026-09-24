@@ -76,6 +76,40 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
     adaptive_runtime_direct(
         model_spec(
             def(
+                "native_skill_list",
+                super::ToolAuditPolicy::typed_fields(&[
+                    super::ToolAuditResultField::value("project"),
+                    super::ToolAuditResultField::value("total_count"),
+                    super::ToolAuditResultField::value("returned_count"),
+                    super::ToolAuditResultField::value("next_offset"),
+                    super::ToolAuditResultField::value("error_kind"),
+                    super::ToolAuditResultField::value("state_changed"),
+                ])
+                .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&["query"])),
+                ModelVisible,
+                TOOL_CATEGORY_RUNTIME,
+                Some(OwnerOnly),
+                TOOL_PROVIDER_RUNNER,
+                super::ToolSemanticContract {
+                    effect: super::ToolEffect::Observe,
+                    risk: Read,
+                    approval: super::ToolApprovalPolicy::None,
+                    idempotency: super::ToolIdempotency::PureRead,
+                },
+                Some(PROJECT_READ),
+                true,
+                NoPath,
+                false,
+                false,
+                super::ToolSessionEvidencePolicy::NONE,
+            ),
+            "Search the complete native Codex Skill catalog on the same Runner with bounded pagination. Returns pathless names, descriptions, scope/plugin metadata, and opaque native_skill_id values; starts no Codex model turn.",
+        ),
+        28,
+    ),
+    adaptive_runtime_direct(
+        model_spec(
+            def(
                 "native_skill_load",
                 super::ToolAuditPolicy::typed_fields(&[
                     super::ToolAuditResultField::value("project"),
@@ -84,6 +118,12 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolAuditResultField::value("plugin_id"),
                     super::ToolAuditResultField::value("sha256"),
                     super::ToolAuditResultField::value("bytes"),
+                    super::ToolAuditResultField::value("start_line"),
+                    super::ToolAuditResultField::value("end_line"),
+                    super::ToolAuditResultField::value("total_lines"),
+                    super::ToolAuditResultField::value("returned_lines"),
+                    super::ToolAuditResultField::value("has_more"),
+                    super::ToolAuditResultField::value("next_start_line"),
                     super::ToolAuditResultField::value("truncated"),
                     super::ToolAuditResultField::value("candidate_count"),
                     super::ToolAuditResultField::value("candidates_truncated"),
@@ -111,9 +151,9 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Load one native Codex Skill through the same Runner's Context Bridge by exact name, optionally using an opaque native_skill_id only when duplicate names are reported. Never supply or infer a native filesystem path. The bounded read is schema-bound, fail-closed, and starts no Codex model turn.",
+            "Load one native Codex Skill through the same Runner's Context Bridge by exact name, optionally using an opaque native_skill_id when duplicate names are reported. Supports pathless start_line/limit continuation and starts no Codex model turn.",
         ),
-        28,
+        29,
     ),
     adaptive_runtime_direct(
         model_spec(
@@ -152,7 +192,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             ),
             "Load one project knowledge entry using only its reuse-manifest semantic key. WebCodex resolves the entry on the same Runner, requires it to remain inside the Project, checks the manifest entry hash when present, and supports line continuation by key without exposing the manifest or entry path.",
         ),
-        29,
+        35,
     ),
     adaptive_runtime_direct(
         require_all_scopes(

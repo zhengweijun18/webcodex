@@ -4906,15 +4906,31 @@ impl ToolCallAuditProjection for ToolCall {
                 "project": project,
                 "name_present": !name.is_empty(),
             }),
+            Self::NativeSkillList {
+                project,
+                query,
+                offset,
+                limit,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "query_present": query.as_ref().is_some_and(|value| !value.is_empty()),
+                "offset": offset,
+                "limit": limit,
+            }),
             Self::NativeSkillLoad {
                 project,
                 name,
                 native_skill_id,
+                start_line,
+                limit,
                 ..
             } => serde_json::json!({
                 "project": project,
                 "name_present": !name.is_empty(),
                 "native_skill_id_present": native_skill_id.is_some(),
+                "start_line": start_line,
+                "limit": limit,
             }),
             Self::NativeKnowledgeLoad {
                 project,
@@ -4926,6 +4942,63 @@ impl ToolCallAuditProjection for ToolCall {
                 "project": project,
                 "key_present": !key.is_empty(),
                 "start_line": start_line,
+                "limit": limit,
+            }),
+            Self::NativeMcpSearch {
+                project,
+                query,
+                server,
+                read_only_only,
+                offset,
+                limit,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "query_present": query.as_ref().is_some_and(|value| !value.is_empty()),
+                "server_present": server.as_ref().is_some_and(|value| !value.is_empty()),
+                "read_only_only": read_only_only,
+                "offset": offset,
+                "limit": limit,
+            }),
+            Self::NativeMcpDescribe {
+                project,
+                server,
+                tool,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "server_present": !server.is_empty(),
+                "tool_present": !tool.is_empty(),
+            }),
+            Self::NativeMcpCallReadonly {
+                project,
+                server,
+                tool,
+                arguments,
+                ..
+            }
+            | Self::NativeMcpCallEffectful {
+                project,
+                server,
+                tool,
+                arguments,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "server_present": !server.is_empty(),
+                "tool_present": !tool.is_empty(),
+                "argument_count": arguments.len(),
+            }),
+            Self::NativeThreadRead {
+                project,
+                session,
+                cursor,
+                limit,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "session_present": !session.is_empty(),
+                "cursor_present": cursor.is_some(),
                 "limit": limit,
             }),
             Self::RunSkillResource {

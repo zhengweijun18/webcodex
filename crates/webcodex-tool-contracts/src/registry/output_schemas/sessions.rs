@@ -71,6 +71,22 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 ),
             ),
         ])),
+        "native_thread_read" => Some(wrapped_output_schema(vec![
+            ("project", schema_type("string", "Resolved WebCodex Project id.")),
+            ("query", schema_type("string", "Native thread id/prefix/name query.")),
+            ("resolved", schema_type("boolean", "Whether the query resolved to exactly one native thread.")),
+            ("ambiguous", schema_type("boolean", "True only when the query matched multiple native threads.")),
+            ("candidates", array_schema(open_object_schema("Bounded pathless native thread candidate identity."), "Returned only for unresolved queries.")),
+            ("thread", open_object_schema("Path-safe native thread metadata. Filesystem paths and full turn bodies are omitted.")),
+            ("items", array_schema(open_object_schema("Path-safe recent native thread item summary."), "Newest-first canonical native thread item page.")),
+            ("next_cursor", nullable_schema("string", "Opaque cursor for the next older item page.")),
+            ("backwards_cursor", nullable_schema("string", "Opaque cursor for reverse-direction observation when supplied by app-server.")),
+            ("quota_mode", schema_type("string", "Always zero_codex_model_turn.")),
+            ("model_turn_started", schema_type("boolean", "Always false.")),
+            ("state_changed", schema_type("boolean", "Always false.")),
+            ("error_kind", schema_type("string", "Stable native thread guard/error code on failure.")),
+            ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
+        ])),
         "session_summary" => Some(wrapped_output_schema(vec![
             ("session_id", schema_type("string", "Opaque session id.")),
             (

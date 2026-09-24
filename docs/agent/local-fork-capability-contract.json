@@ -65,7 +65,17 @@
     {
       "id": "pathless_native_context_loading",
       "required": true,
-      "description": "Model-visible native_skill_load and native_knowledge_load use only Skill name/opaque id or semantic knowledge key; native filesystem paths stay internal, duplicate Skill names fail closed, knowledge entries stay inside the Project, and all Bridge calls remain same-Runner schema-bound zero-quota reads."
+      "description": "Model-visible native_skill_list/native_skill_load and native_knowledge_load use only catalog query, Skill name/opaque id, line continuation, or semantic knowledge key; native filesystem paths stay internal, duplicate Skill names fail closed, knowledge entries stay inside the Project, and all Bridge calls remain same-Runner schema-bound zero-quota reads."
+    },
+    {
+      "id": "zero_turn_native_mcp_projection",
+      "required": true,
+      "description": "Model-visible native MCP discovery/describe/read-only/effectful helpers are same-Runner and zero-turn; discovery excludes destructive and unclassified tools, calls re-check live Codex annotations, and the effectful lane admits only explicitly non-destructive tools."
+    },
+    {
+      "id": "canonical_native_thread_resume",
+      "required": true,
+      "description": "WebCodex can resume native Codex task state through canonical app-server thread/read plus thread/items/list pagination while keeping native paths and raw MCP arguments/results out of the model projection."
     },
     {
       "id": "native_first_zero_turn_host_execution",
@@ -119,6 +129,9 @@
         "crates/webcodex-tool-contracts/src/tool_definition/jobs.rs",
         "crates/webcodex-tool-contracts/src/registry/output_schemas/jobs.rs",
         "crates/webcodex-tool-contracts/src/tool_definition/skills.rs",
+        "crates/webcodex-tool-contracts/src/tool_definition/plugins.rs",
+        "crates/webcodex-tool-contracts/src/tool_definition/sessions.rs",
+        "crates/webcodex-tool-contracts/src/registry/output_schemas/sessions.rs",
         "crates/webcodex-tool-runtime-contracts/src/tool_audit.rs",
         "crates/webcodex-workflow-session/src/model.rs",
         "crates/webcodex-workflow-session/src/persistence.rs",

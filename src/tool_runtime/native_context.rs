@@ -18,8 +18,14 @@ const NATIVE_CONTEXT_TOOL: &str = "bootstrap_context";
 const NATIVE_SKILL_LIST_TOOL: &str = "list_native_skills";
 const NATIVE_SKILL_READ_TOOL: &str = "read_native_skill";
 const NATIVE_KNOWLEDGE_RESOLVE_TOOL: &str = "resolve_project_knowledge";
+const NATIVE_MCP_SEARCH_TOOL: &str = "search_native_mcp_tools";
+const NATIVE_MCP_DESCRIBE_TOOL: &str = "describe_native_mcp_tool";
+const NATIVE_MCP_READONLY_TOOL: &str = "call_native_mcp_readonly";
+const NATIVE_MCP_EFFECTFUL_TOOL: &str = "call_native_mcp_effectful";
+const NATIVE_THREAD_READ_TOOL: &str = "native_thread_read";
 const NATIVE_HOST_EXEC_TOOL: &str = "native_host_exec_readonly";
 const MAX_NATIVE_SKILL_TEXT_BYTES: usize = 48 * 1024;
+const MAX_NATIVE_MCP_ARGUMENT_BYTES: usize = 64 * 1024;
 const MAX_NATIVE_SKILL_CANDIDATES: usize = 8;
 const MAX_NATIVE_KNOWLEDGE_KEYS: usize = 32;
 pub(crate) const STARTUP_NATIVE_CONTEXT_MAX_BYTES: usize = 4 * 1024;
@@ -57,11 +63,84 @@ pub(crate) fn native_instruction_fingerprint(
 }
 
 impl ToolRuntime {
+    pub(crate) async fn native_skill_list(
+        &self,
+        project: &ResolvedProject,
+        query: Option<String>,
+        offset: Option<usize>,
+        limit: Option<usize>,
+        auth: Option<&AuthContext>,
+    ) -> ToolResult {
+        let catalog = match self
+            .call_native_context_bridge(
+                project,
+                NATIVE_SKILL_LIST_TOOL,
+                json!({"project_root": project.config.path, "force_reload": false}),
+                auth,
+            )
+            .await
+        {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        let needle = query
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_lowercase);
+        let mut skills = catalog
+            .get("skills")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(native_skill_candidate)
+            .filter(|candidate| {
+                needle.as_ref().is_none_or(|needle| {
+                    [
+                        candidate.name.as_str(),
+                        candidate.description.as_deref().unwrap_or_default(),
+                        candidate.scope.as_deref().unwrap_or_default(),
+                        candidate.plugin_id.as_deref().unwrap_or_default(),
+                    ]
+                    .join("\n")
+                    .to_lowercase()
+                    .contains(needle)
+                })
+            })
+            .collect::<Vec<_>>();
+        skills.sort_by(|left, right| {
+            left.name
+                .to_lowercase()
+                .cmp(&right.name.to_lowercase())
+                .then_with(|| left.native_skill_id.cmp(&right.native_skill_id))
+        });
+        let total_count = skills.len();
+        let offset = offset.unwrap_or(0).min(total_count);
+        let limit = limit.unwrap_or(20).clamp(1, 100);
+        let end = offset.saturating_add(limit).min(total_count);
+        let entries = skills[offset..end]
+            .iter()
+            .map(native_skill_entry_projection)
+            .collect::<Vec<_>>();
+        ToolResult::ok(json!({
+            "project": project.resolved_id,
+            "query": query,
+            "total_count": total_count,
+            "offset": offset,
+            "returned_count": entries.len(),
+            "entries": entries,
+            "next_offset": (end < total_count).then_some(end),
+            "state_changed": false,
+        }))
+    }
+
     pub(crate) async fn native_skill_load(
         &self,
         project: &ResolvedProject,
         name: String,
         native_skill_id: Option<String>,
+        start_line: Option<usize>,
+        limit: Option<usize>,
         auth: Option<&AuthContext>,
     ) -> ToolResult {
         let name = match validate_native_skill_name(name) {
@@ -150,7 +229,10 @@ impl ToolRuntime {
             Err(result) => return result,
         };
         let text = raw.get("text").and_then(Value::as_str).unwrap_or_default();
-        let (text, truncated) = bounded_utf8_bytes(text, MAX_NATIVE_SKILL_TEXT_BYTES);
+        let page = match paginate_native_skill_text(text, start_line, limit) {
+            Ok(page) => page,
+            Err(reason) => return native_context_tool_error(&project.resolved_id, reason, None),
+        };
         let skill = raw.get("skill").unwrap_or(&Value::Null);
         let file = raw.get("file").unwrap_or(&Value::Null);
         ToolResult::ok(json!({
@@ -164,8 +246,14 @@ impl ToolRuntime {
             "resource": raw.get("resource").and_then(Value::as_str).unwrap_or("SKILL.md"),
             "sha256": file.get("sha256").and_then(Value::as_str),
             "bytes": file.get("bytes").and_then(Value::as_u64),
-            "text": text,
-            "truncated": truncated,
+            "text": page.text,
+            "start_line": page.start_line,
+            "end_line": page.end_line,
+            "total_lines": page.total_lines,
+            "returned_lines": page.returned_lines,
+            "has_more": page.has_more,
+            "next_start_line": page.next_start_line,
+            "truncated": page.has_more,
             "state_changed": false,
         }))
     }
@@ -292,6 +380,134 @@ impl ToolRuntime {
             "next_start_line": output.get("next_start_line"),
             "state_changed": false,
         }))
+    }
+
+    pub(crate) async fn native_mcp_search(
+        &self,
+        project: &ResolvedProject,
+        query: Option<String>,
+        server: Option<String>,
+        read_only_only: Option<bool>,
+        offset: Option<usize>,
+        limit: Option<usize>,
+        auth: Option<&AuthContext>,
+    ) -> ToolResult {
+        let raw = match self
+            .call_native_context_bridge(
+                project,
+                NATIVE_MCP_SEARCH_TOOL,
+                json!({
+                    "project_root": project.config.path,
+                    "query": query.unwrap_or_default(),
+                    "server": server,
+                    "read_only_only": read_only_only.unwrap_or(true),
+                    "offset": offset.unwrap_or(0),
+                    "limit": limit.unwrap_or(50).clamp(1, 100),
+                }),
+                auth,
+            )
+            .await
+        {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        native_zero_turn_result(&project.resolved_id, raw, Some(false))
+    }
+
+    pub(crate) async fn native_mcp_describe(
+        &self,
+        project: &ResolvedProject,
+        server: String,
+        tool: String,
+        auth: Option<&AuthContext>,
+    ) -> ToolResult {
+        let raw = match self
+            .call_native_context_bridge(
+                project,
+                NATIVE_MCP_DESCRIBE_TOOL,
+                json!({
+                    "project_root": project.config.path,
+                    "server": server,
+                    "tool": tool,
+                }),
+                auth,
+            )
+            .await
+        {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        native_zero_turn_result(&project.resolved_id, raw, Some(false))
+    }
+
+    pub(crate) async fn native_mcp_call(
+        &self,
+        project: &ResolvedProject,
+        server: String,
+        tool: String,
+        arguments: std::collections::BTreeMap<String, Value>,
+        effectful: bool,
+        auth: Option<&AuthContext>,
+    ) -> ToolResult {
+        let arguments = Value::Object(arguments.into_iter().collect());
+        if serialized_json_len(&arguments).unwrap_or(usize::MAX) > MAX_NATIVE_MCP_ARGUMENT_BYTES {
+            return native_context_tool_error(
+                &project.resolved_id,
+                "native_mcp_arguments_too_large",
+                None,
+            );
+        }
+        let bridge_tool = if effectful {
+            NATIVE_MCP_EFFECTFUL_TOOL
+        } else {
+            NATIVE_MCP_READONLY_TOOL
+        };
+        let raw = match self
+            .call_native_context_bridge(
+                project,
+                bridge_tool,
+                json!({
+                    "project_root": project.config.path,
+                    "server": server,
+                    "tool": tool,
+                    "arguments": arguments,
+                }),
+                auth,
+            )
+            .await
+        {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        native_zero_turn_result(&project.resolved_id, raw, (!effectful).then_some(false))
+    }
+
+    pub(crate) async fn native_thread_read(
+        &self,
+        project: &ResolvedProject,
+        session: String,
+        cursor: Option<String>,
+        limit: Option<usize>,
+        auth: Option<&AuthContext>,
+    ) -> ToolResult {
+        let raw = match self
+            .call_native_context_bridge(
+                project,
+                NATIVE_THREAD_READ_TOOL,
+                json!({
+                    "project_root": project.config.path,
+                    "session": session,
+                    "cursor": cursor,
+                    "limit": limit.unwrap_or(20).clamp(1, 50),
+                }),
+                auth,
+            )
+            .await
+        {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        native_zero_turn_result(&project.resolved_id, raw, Some(false))
     }
 
     pub(crate) async fn native_host_exec_readonly(
@@ -914,19 +1130,21 @@ fn native_skill_candidate(skill: &Value) -> Option<NativeSkillCandidate> {
     })
 }
 
+fn native_skill_entry_projection(candidate: &NativeSkillCandidate) -> Value {
+    json!({
+        "native_skill_id": candidate.native_skill_id,
+        "name": candidate.name,
+        "scope": candidate.scope,
+        "plugin_id": candidate.plugin_id,
+        "description": candidate.description,
+    })
+}
+
 fn native_skill_candidate_projection(candidates: &[NativeSkillCandidate]) -> Vec<Value> {
     candidates
         .iter()
         .take(MAX_NATIVE_SKILL_CANDIDATES)
-        .map(|candidate| {
-            json!({
-                "native_skill_id": candidate.native_skill_id,
-                "name": candidate.name,
-                "scope": candidate.scope,
-                "plugin_id": candidate.plugin_id,
-                "description": candidate.description,
-            })
-        })
+        .map(native_skill_entry_projection)
         .collect()
 }
 
@@ -991,15 +1209,76 @@ fn project_relative_bridge_path(project_root: &str, absolute_entry: &str) -> Opt
     Some(relative.to_string())
 }
 
-fn bounded_utf8_bytes(value: &str, max_bytes: usize) -> (String, bool) {
-    if value.len() <= max_bytes {
-        return (value.to_string(), false);
+struct NativeSkillTextPage {
+    text: String,
+    start_line: usize,
+    end_line: Option<usize>,
+    total_lines: usize,
+    returned_lines: usize,
+    has_more: bool,
+    next_start_line: Option<usize>,
+}
+
+fn paginate_native_skill_text(
+    value: &str,
+    start_line: Option<usize>,
+    limit: Option<usize>,
+) -> Result<NativeSkillTextPage, &'static str> {
+    let lines = if value.is_empty() {
+        Vec::new()
+    } else {
+        value.split_inclusive('\n').collect::<Vec<_>>()
+    };
+    let total_lines = lines.len();
+    let start_line = start_line.unwrap_or(1);
+    if start_line == 0 || (total_lines > 0 && start_line > total_lines) {
+        return Err("native_skill_start_line_out_of_range");
     }
-    let mut end = max_bytes;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
+    let limit = limit.unwrap_or(200).clamp(1, 400);
+    let start_index = start_line.saturating_sub(1).min(total_lines);
+    let mut text = String::new();
+    let mut returned_lines = 0usize;
+    for line in lines.iter().skip(start_index).take(limit) {
+        if text.len().saturating_add(line.len()) > MAX_NATIVE_SKILL_TEXT_BYTES {
+            if text.is_empty() {
+                return Err("native_skill_line_too_large");
+            }
+            break;
+        }
+        text.push_str(line);
+        returned_lines += 1;
     }
-    (value[..end].to_string(), true)
+    let consumed = start_index + returned_lines;
+    let has_more = consumed < total_lines;
+    Ok(NativeSkillTextPage {
+        text,
+        start_line,
+        end_line: (returned_lines > 0).then_some(start_line + returned_lines - 1),
+        total_lines,
+        returned_lines,
+        has_more,
+        next_start_line: has_more.then_some(start_line + returned_lines),
+    })
+}
+
+fn native_zero_turn_result(
+    project: &str,
+    mut raw: Value,
+    state_changed: Option<bool>,
+) -> ToolResult {
+    if raw.get("quota_mode").and_then(Value::as_str) != Some("zero_codex_model_turn")
+        || raw.get("model_turn_started").and_then(Value::as_bool) != Some(false)
+    {
+        return native_context_tool_error(project, "native_zero_turn_contract_drift", None);
+    }
+    let Some(output) = raw.as_object_mut() else {
+        return native_context_tool_error(project, "native_context_result_unstructured", None);
+    };
+    output.insert("project".to_string(), Value::String(project.to_string()));
+    if let Some(state_changed) = state_changed {
+        output.insert("state_changed".to_string(), Value::Bool(state_changed));
+    }
+    ToolResult::ok(raw)
 }
 
 fn native_context_tool_error(project: &str, error_kind: &str, extra: Option<Value>) -> ToolResult {
@@ -1211,13 +1490,26 @@ mod tests {
     }
 
     #[test]
-    fn native_skill_text_byte_bound_preserves_utf8() {
-        let input = "你".repeat(32);
-        let (bounded, truncated) = bounded_utf8_bytes(&input, 17);
-        assert!(truncated);
-        assert!(bounded.len() <= 17);
-        assert!(std::str::from_utf8(bounded.as_bytes()).is_ok());
-        assert_eq!(bounded, "你".repeat(5));
+    fn native_skill_text_paginates_by_complete_lines_and_bytes() {
+        let input = (1..=450)
+            .map(|line| format!("line-{line:03} {}\n", "你".repeat(60)))
+            .collect::<String>();
+        let first = paginate_native_skill_text(&input, None, Some(400)).unwrap();
+        assert_eq!(first.start_line, 1);
+        assert!(first.returned_lines < 400);
+        assert!(first.text.len() <= MAX_NATIVE_SKILL_TEXT_BYTES);
+        assert!(first.has_more);
+        assert_eq!(
+            first.next_start_line,
+            Some(first.returned_lines.saturating_add(1))
+        );
+
+        let second = paginate_native_skill_text(&input, first.next_start_line, Some(400)).unwrap();
+        assert_eq!(second.start_line, first.next_start_line.unwrap());
+        assert!(!second.text.is_empty());
+        assert_eq!(second.end_line, Some(450));
+        assert!(!second.has_more);
+        assert_eq!(second.next_start_line, None);
     }
 
     #[test]

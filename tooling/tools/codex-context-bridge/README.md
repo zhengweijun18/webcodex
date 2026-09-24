@@ -2,20 +2,26 @@
 
 把本机 Codex 的可观察上下文通过 Runner 内部 MCP 提供给 WebCodex。它是 WebCodex fork 的可复现运行组件，不是模型可直接枚举/调用的通用 MCP Provider。它不复制 Native Host 或模型智能，也不产生 Codex model turn。
 
-当前 Bridge 版本为 **0.6.0**。`readiness.mjs` 是 Desktop、Runner 与 Bridge 共同使用的 Codex reference 真相源：允许受支持的 CLI symlink 入口，但必须 canonicalize 到最终 regular executable；显式无效的 `CODEX_BIN` 会 fail closed，不会静默改用另一份 Codex。
+当前 Bridge 版本为 **0.6.1**。`readiness.mjs` 是 Desktop、Runner 与 Bridge 共同使用的 Codex reference 真相源：允许受支持的 CLI symlink 入口，但必须 canonicalize 到最终 regular executable；显式无效的 `CODEX_BIN` 会 fail closed，不会静默改用另一份 Codex。
 
 ## 能力
 
 - `bootstrap_context`：读取用户级 `AGENTS.md`、原生 Codex Skill catalog、Hook registry、
   项目知识入口和当前 Ponytail mode，并生成 context fingerprint。
 - `list_native_skills` / `read_native_skill`：通过当前 Codex app-server 的
-  `skills/list` 获取原生发现结果，再受限读取被发现 Skill 的文本资源。
+  `skills/list` 获取完整原生目录，再由 WebCodex 以分页、pathless 方式发现和读取 Skill。
 - `list_native_hooks` / `dispatch_hook_event`：通过当前 Codex app-server 的
   `hooks/list` 获取 Codex 自己计算的 trust status；只执行 `trusted/managed` 且 enabled
   的 command hook。
+- `search_native_mcp_tools` / `describe_native_mcp_tool` / `call_native_mcp_readonly` /
+  `call_native_mcp_effectful`：读取 Codex-managed MCP/Plugin 的 live catalog，并只允许
+  read-only 或明确 non-destructive 的 effectful lane；destructive / unclassified 工具不进入
+  通用调用代理。
 - `native_host_exec_readonly`：通过 Codex app-server `command/exec` 执行 literal argv；强制 `readOnly` 文件系统 sandbox、关闭 network，且不创建 thread/model turn。上层 WebCodex 仍将进程执行按 effectful + approval-gated 处理。
 - `resolve_project_knowledge`：只按项目 `reuse-manifest.json.knowledge_paths` 解析知识入口。
-- `codex_thread_summary`：从本机 Codex session index / rollout 中恢复一个线程的有界进度摘要。
+- `native_thread_read`：用 app-server `thread/read` + `thread/items/list` 读取一个线程的
+  canonical 元数据与分页任务状态，并移除本机路径和原始 MCP 参数/结果。
+- `codex_thread_summary`：保留为本地 session index / rollout 的有界兼容摘要。
 - `context_parity_check`：检查用户级 AGENTS、Skill、Hook trust、项目知识入口和 fingerprint。
 
 ## 设计边界

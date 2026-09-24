@@ -94,10 +94,10 @@ build / test 等长任务交给 Job 持续运行
 - **Native Context runtime：8/8 PASS**
 - **Scoped Project Instructions：PASS**
 - **Workflow Native Context continuity：PASS**
-- **Required Capability Contract：12/12 PASS**
+- **Required Capability Contract：16/16 PASS**
 - **Desktop lifecycle regression：17/17 PASS**
 - **Upstream compatibility rehearsal：PASS**
-- **Bundled Node / Context Bridge：`v24.21.0` / `0.5.1`，bundled self-check PASS**
+- **Context Bridge 源码：`0.6.1`，self-check PASS；最后一次已发布的 bundled Node / Context Bridge 基线仍为 `v24.21.0` / `0.5.1`**
 - **Single-Install Provider 自动注册：PASS**；普通 Desktop 用户不需要手工装 Node、复制 Bridge、修改 `runner.toml`
 - **Native Codex model turns：0**
 - **历史 macOS dogfood 对齐证据：Source / Installed Desktop / Running Server+Runner 曾全部对齐到 `6a3f3ea49e9f`**；当前跨平台源码基线见本文顶部。

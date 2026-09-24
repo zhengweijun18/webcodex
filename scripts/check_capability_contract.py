@@ -381,6 +381,120 @@ def probe(root: Path, capability: str, zero_quota_state: Path | None) -> tuple[b
             "contract": contract_data,
             "model_surface": model_data,
         }
+    if capability == "zero_turn_native_mcp_projection":
+        bridge_ok, bridge_data = contains_any(
+            root,
+            (
+                (
+                    "tooling/tools/codex-context-bridge/bridge-lib.mjs",
+                    (
+                        "searchNativeMcpTools",
+                        "callNativeMcpReadOnly",
+                        "callNativeMcpEffectful",
+                        "effectful_non_destructive",
+                        "zero_codex_model_turn",
+                    ),
+                ),
+                (
+                    "tooling/tools/codex-context-bridge/self-check.mjs",
+                    (
+                        "native_mcp_search_pagination",
+                        "native_mcp_search_excludes_destructive",
+                        "native_model_turns",
+                    ),
+                ),
+            ),
+        )
+        runtime_ok, runtime_data = contains_any(
+            root,
+            (
+                (
+                    "src/tool_runtime/native_context.rs",
+                    (
+                        "native_mcp_search",
+                        "native_mcp_describe",
+                        "native_mcp_call",
+                        "native_zero_turn_result",
+                    ),
+                ),
+                (
+                    "src/tool_runtime/dispatch.rs",
+                    (
+                        "ToolCall::NativeMcpSearch",
+                        "ToolCall::NativeMcpCallReadonly",
+                        "ToolCall::NativeMcpCallEffectful",
+                    ),
+                ),
+            ),
+        )
+        contract_ok, contract_data = contains_any(
+            root,
+            (
+                (
+                    "crates/webcodex-tool-contracts/src/tool_definition/plugins.rs",
+                    (
+                        '"native_mcp_search"',
+                        '"native_mcp_call_readonly"',
+                        '"native_mcp_call_effectful"',
+                        "OwnerOnly",
+                    ),
+                ),
+            ),
+        )
+        return bridge_ok and runtime_ok and contract_ok, {
+            "bridge": bridge_data,
+            "runtime": runtime_data,
+            "contract": contract_data,
+        }
+    if capability == "canonical_native_thread_resume":
+        bridge_ok, bridge_data = contains_any(
+            root,
+            (
+                (
+                    "tooling/tools/codex-context-bridge/bridge-lib.mjs",
+                    (
+                        "nativeThreadRead",
+                        '"thread/read"',
+                        '"thread/items/list"',
+                        "zero_codex_model_turn",
+                    ),
+                ),
+                (
+                    "tooling/tools/codex-context-bridge/self-check.mjs",
+                    (
+                        "native_thread_read_path_safe",
+                        "DO_NOT_EXPOSE",
+                    ),
+                ),
+            ),
+        )
+        runtime_ok, runtime_data = contains_any(
+            root,
+            (
+                (
+                    "src/tool_runtime/native_context.rs",
+                    ("native_thread_read", "NATIVE_THREAD_READ_TOOL"),
+                ),
+                (
+                    "src/tool_runtime/dispatch.rs",
+                    ("ToolCall::NativeThreadRead",),
+                ),
+            ),
+        )
+        contract_ok, contract_data = contains_any(
+            root,
+            (
+                (
+                    "crates/webcodex-tool-contracts/src/tool_definition/sessions.rs",
+                    ('"native_thread_read"', "OwnerOnly"),
+                ),
+            ),
+        )
+        return bridge_ok and runtime_ok and contract_ok, {
+            "bridge": bridge_data,
+            "runtime": runtime_data,
+            "contract": contract_data,
+        }
     if capability == "native_first_zero_turn_host_execution":
         bridge_ok, bridge_data = contains_any(
             root,

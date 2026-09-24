@@ -214,6 +214,7 @@ export async function searchNativeMcpTools(projectRoot, {
   query = "",
   server = null,
   readOnlyOnly = true,
+  offset = 0,
   limit = 50
 } = {}) {
   ensureProjectRoot(projectRoot);
@@ -229,21 +230,28 @@ export async function searchNativeMcpTools(projectRoot, {
     if (!serverName || (selectedServer && serverName !== selectedServer)) continue;
     for (const tool of nativeMcpToolEntries(item)) {
       const compact = compactNativeMcpTool(serverName, tool);
-      if (readOnlyOnly && !compact.read_only) continue;
+      if (readOnlyOnly ? !compact.read_only : !["read_only", "effectful_non_destructive"].includes(compact.policy_class)) continue;
       const haystack = `${serverName}\n${tool.name}\n${tool.description || ""}`.toLowerCase();
       if (needle && !haystack.includes(needle)) continue;
       all.push(compact);
     }
   }
+  const boundedOffset = Math.max(0, Math.min(Number(offset) || 0, all.length));
   const boundedLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
+  const tools = all.slice(boundedOffset, boundedOffset + boundedLimit);
+  const nextOffset = boundedOffset + tools.length;
   return {
     query: query || null,
     server: selectedServer,
     read_only_only: Boolean(readOnlyOnly),
     total_matches: all.length,
-    tools: all.slice(0, boundedLimit),
-    truncated: all.length > boundedLimit,
-    quota_mode: "zero_codex_model_turn"
+    offset: boundedOffset,
+    returned_count: tools.length,
+    tools,
+    next_offset: nextOffset < all.length ? nextOffset : null,
+    truncated: nextOffset < all.length,
+    quota_mode: "zero_codex_model_turn",
+    model_turn_started: false
   };
 }
 
@@ -268,7 +276,8 @@ export async function describeNativeMcpTool(projectRoot, serverName, toolName) {
     annotations: tool.annotations || null,
     policy_class: nativeMcpToolPolicyClass(tool),
     input_schema: boundedNativeMcpResult(inputSchema, 48 * 1024),
-    quota_mode: "zero_codex_model_turn"
+    quota_mode: "zero_codex_model_turn",
+    model_turn_started: false
   };
 }
 
@@ -916,6 +925,171 @@ export async function bootstrapContext(projectRoot, {
         "route against native_skills.catalog and read_native_skill only for the matching Skill",
         "resolve_project_knowledge before reading knowledge bodies"
       ]
+    };
+  });
+}
+
+function boundedThreadText(value, maxChars = 4000) {
+  if (typeof value !== "string") return null;
+  return value.length <= maxChars ? value : value.slice(0, maxChars) + "…";
+}
+
+function threadItemSummary(entry) {
+  const item = entry?.item || {};
+  const base = {
+    turn_id: entry?.turnId || null,
+    type: item.type || "unknown",
+    id: item.id || null
+  };
+  switch (item.type) {
+    case "userMessage": {
+      const text = (item.content || [])
+        .map(part => part?.text || part?.input_text || part?.inputText || "")
+        .filter(Boolean)
+        .join("\n");
+      return { ...base, text: boundedThreadText(text) };
+    }
+    case "agentMessage":
+      return { ...base, phase: item.phase || null, text: boundedThreadText(item.text) };
+    case "plan":
+      return { ...base, text: boundedThreadText(item.text) };
+    case "reasoning":
+      return {
+        ...base,
+        summary: (item.summary || []).slice(0, 8).map(value => boundedThreadText(value, 1000))
+      };
+    case "commandExecution":
+      return {
+        ...base,
+        command: boundedThreadText(item.command, 2000),
+        status: item.status || null,
+        exit_code: Number.isInteger(item.exitCode) ? item.exitCode : null,
+        duration_ms: Number.isFinite(item.durationMs) ? item.durationMs : null,
+        output_preview: boundedThreadText(item.aggregatedOutput, 2000)
+      };
+    case "fileChange":
+      return {
+        ...base,
+        status: item.status || null,
+        change_count: Array.isArray(item.changes) ? item.changes.length : 0
+      };
+    case "mcpToolCall":
+      return {
+        ...base,
+        server: item.server || null,
+        tool: item.tool || null,
+        status: item.status || null,
+        read_only_hint: typeof item.readOnlyHint === "boolean" ? item.readOnlyHint : null,
+        duration_ms: Number.isFinite(item.durationMs) ? item.durationMs : null,
+        has_result: item.result != null,
+        has_error: item.error != null
+      };
+    case "dynamicToolCall":
+      return {
+        ...base,
+        namespace: item.namespace || null,
+        tool: item.tool || null,
+        status: item.status || null,
+        success: typeof item.success === "boolean" ? item.success : null,
+        duration_ms: Number.isFinite(item.durationMs) ? item.durationMs : null
+      };
+    case "functionCallOutput":
+      return { ...base, name: item.name || null, namespace: item.namespace || null };
+    case "collabAgentToolCall":
+      return {
+        ...base,
+        tool: item.tool || null,
+        status: item.status || null,
+        receiver_count: Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.length : 0
+      };
+    default:
+      return base;
+  }
+}
+
+function threadMetadataSummary(thread) {
+  return {
+    id: thread?.id || null,
+    session_id: thread?.sessionId || null,
+    forked_from_id: thread?.forkedFromId || null,
+    parent_thread_id: thread?.parentThreadId || null,
+    project_id: thread?.projectId || null,
+    preview: boundedThreadText(thread?.preview, 2000),
+    ephemeral: Boolean(thread?.ephemeral),
+    model_provider: thread?.modelProvider || null,
+    model: thread?.model || null,
+    reasoning_effort: thread?.reasoningEffort || null,
+    created_at: thread?.createdAt ?? null,
+    updated_at: thread?.updatedAt ?? null,
+    recency_at: thread?.recencyAt ?? null,
+    status: thread?.status?.type || thread?.status || null,
+    cli_version: thread?.cliVersion || null,
+    originator: thread?.originator || null,
+    source: thread?.source?.type || thread?.source || null,
+    can_accept_direct_input: typeof thread?.canAcceptDirectInput === "boolean"
+      ? thread.canAcceptDirectInput
+      : null,
+    name: thread?.name || null
+  };
+}
+
+export async function nativeThreadRead(projectRoot, {
+  session,
+  cursor = null,
+  limit = 20
+} = {}) {
+  const root = ensureProjectRoot(projectRoot);
+  const query = String(session || "").trim();
+  if (!query) throw new Error("native thread session is required");
+  const matches = sessionIndexEntries().filter(item =>
+    item.id === query || item.id?.startsWith(query) || item.thread_name === query
+  );
+  if (matches.length !== 1) {
+    return {
+      query,
+      resolved: false,
+      ambiguous: matches.length > 1,
+      candidates: matches.slice(0, 20).map(item => ({
+        id: item.id || null,
+        thread_name: item.thread_name || null
+      })),
+      quota_mode: "zero_codex_model_turn",
+      model_turn_started: false
+    };
+  }
+
+  const selected = matches[0];
+  const boundedLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
+  return withCodexAppServer(root, async ({ request }) => {
+    const metadata = await request("thread/read", {
+      threadId: selected.id,
+      includeTurns: false
+    }, 30000);
+    const thread = metadata?.thread;
+    const threadCwd = typeof thread?.cwd === "string" ? thread.cwd : null;
+    if (!threadCwd || !fs.existsSync(threadCwd)) {
+      throw new Error("native thread cwd is unavailable");
+    }
+    const canonicalRoot = fs.realpathSync(root);
+    const canonicalCwd = fs.realpathSync(threadCwd);
+    if (canonicalCwd !== canonicalRoot && !canonicalCwd.startsWith(canonicalRoot + path.sep)) {
+      throw new Error("native thread is outside the resolved WebCodex project");
+    }
+    const page = await request("thread/items/list", {
+      threadId: selected.id,
+      cursor,
+      limit: boundedLimit,
+      sortDirection: "desc"
+    }, 30000);
+    return {
+      query,
+      resolved: true,
+      thread: threadMetadataSummary(thread),
+      items: (page?.data || []).map(threadItemSummary),
+      next_cursor: page?.nextCursor || null,
+      backwards_cursor: page?.backwardsCursor || null,
+      quota_mode: "zero_codex_model_turn",
+      model_turn_started: false
     };
   });
 }

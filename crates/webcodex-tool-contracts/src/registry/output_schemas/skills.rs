@@ -224,6 +224,32 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("error_kind", schema_type("string", "Stable guard/error code on failure.")),
             ("state_changed", schema_type("boolean", "Always false for Skill loading failures.")),
         ])),
+        "native_skill_list" => Some(wrapped_output_schema(vec![
+            ("project", schema_type("string", "Resolved Project id.")),
+            ("query", nullable_schema("string", "Effective optional catalog query.")),
+            ("total_count", schema_type("integer", "Native Skills matching the optional query.")),
+            ("offset", schema_type("integer", "Zero-based filtered catalog offset.")),
+            ("returned_count", schema_type("integer", "Pathless Skill descriptors returned in this page.")),
+            ("entries", array_schema(
+                json!({
+                    "type":"object",
+                    "properties":{
+                        "native_skill_id":{"type":"string","pattern":"^wc_nskill_[A-Za-z0-9_-]{22}$"},
+                        "name":{"type":"string","maxLength":96},
+                        "scope":{"anyOf":[{"type":"string"},{"type":"null"}]},
+                        "plugin_id":{"anyOf":[{"type":"string"},{"type":"null"}]},
+                        "description":{"anyOf":[{"type":"string"},{"type":"null"}]}
+                    },
+                    "required":["native_skill_id","name","scope","plugin_id","description"],
+                    "additionalProperties":false
+                }),
+                "Deterministically sorted pathless native Skill descriptors."
+            )),
+            ("next_offset", nullable_schema("integer", "Next zero-based offset, or null when complete.")),
+            ("error_kind", schema_type("string", "Stable native Skill catalog guard/error code on failure.")),
+            ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
+            ("state_changed", schema_type("boolean", "Always false for native Skill discovery.")),
+        ])),
         "native_skill_load" => Some(wrapped_output_schema(vec![
             ("project", schema_type("string", "Resolved Project id.")),
             ("native_skill_id", schema_type("string", "Opaque pathless native Codex Skill identity.")),
@@ -235,8 +261,14 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("resource", schema_type("string", "Loaded Skill resource name, normally SKILL.md.")),
             ("sha256", nullable_schema("string", "Loaded resource SHA-256 when reported by the bridge.")),
             ("bytes", nullable_schema("integer", "Loaded resource byte size when reported by the bridge.")),
-            ("text", schema_type("string", "Bounded UTF-8 native Skill text.")),
-            ("truncated", schema_type("boolean", "Whether WebCodex truncated the returned native Skill text.")),
+            ("text", schema_type("string", "Bounded UTF-8 native Skill text page.")),
+            ("start_line", schema_type("integer", "Effective 1-based start line.")),
+            ("end_line", nullable_schema("integer", "Last returned line, or null for an empty source.")),
+            ("total_lines", schema_type("integer", "Total SKILL.md source lines.")),
+            ("returned_lines", schema_type("integer", "Returned complete source lines.")),
+            ("has_more", schema_type("boolean", "Whether more SKILL.md lines remain.")),
+            ("next_start_line", nullable_schema("integer", "Next 1-based line for pathless continuation.")),
+            ("truncated", schema_type("boolean", "Compatibility alias for has_more.")),
             ("candidate_count", json!({"type":"integer","minimum":2,"description":"Exact-name candidate count when selection is ambiguous."})),
             ("candidates", {
                 let mut schema = array_schema(
@@ -261,6 +293,65 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("error_kind", schema_type("string", "Stable native Skill guard/error code on failure.")),
             ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
             ("state_changed", schema_type("boolean", "Always false for native Skill loading.")),
+        ])),
+        "native_mcp_search" => Some(wrapped_output_schema(vec![
+            ("project", schema_type("string", "Resolved Project id.")),
+            ("query", nullable_schema("string", "Effective optional tool query.")),
+            ("server", nullable_schema("string", "Optional exact native MCP server filter.")),
+            ("read_only_only", schema_type("boolean", "Whether discovery was restricted to explicitly read-only tools.")),
+            ("total_matches", schema_type("integer", "Matching live native MCP/Plugin tools.")),
+            ("offset", schema_type("integer", "Zero-based filtered result offset.")),
+            ("returned_count", schema_type("integer", "Tool descriptors returned in this page.")),
+            ("tools", array_schema(
+                json!({
+                    "type":"object",
+                    "properties":{
+                        "server":{"type":"string"},
+                        "name":{"type":"string"},
+                        "description":{"anyOf":[{"type":"string"},{"type":"null"}]},
+                        "annotations":{"type":["object","null"],"additionalProperties":true},
+                        "read_only":{"type":"boolean"},
+                        "policy_class":{"type":"string","enum":["read_only","effectful_non_destructive","destructive","unclassified"]}
+                    },
+                    "required":["server","name","description","annotations","read_only","policy_class"],
+                    "additionalProperties":false
+                }),
+                "Live native MCP/Plugin tool descriptors."
+            )),
+            ("next_offset", nullable_schema("integer", "Next zero-based result offset, or null when complete.")),
+            ("truncated", schema_type("boolean", "Whether more filtered tools remain.")),
+            ("quota_mode", schema_type("string", "Always zero_codex_model_turn.")),
+            ("model_turn_started", schema_type("boolean", "Always false.")),
+            ("state_changed", schema_type("boolean", "Always false for discovery.")),
+            ("error_kind", schema_type("string", "Stable native MCP guard/error code on failure.")),
+            ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
+        ])),
+        "native_mcp_describe" => Some(wrapped_output_schema(vec![
+            ("project", schema_type("string", "Resolved Project id.")),
+            ("server", schema_type("string", "Exact native MCP server.")),
+            ("name", schema_type("string", "Exact native MCP/Plugin tool name.")),
+            ("description", nullable_schema("string", "Live tool description.")),
+            ("annotations", json!({"type":["object","null"],"additionalProperties":true,"description":"Live native tool annotations."})),
+            ("policy_class", schema_type("string", "Target-mode policy class derived from live annotations.")),
+            ("input_schema", json!({"type":"object","additionalProperties":true,"description":"Bounded envelope containing the live input schema or a bounded preview when oversized."})),
+            ("quota_mode", schema_type("string", "Always zero_codex_model_turn.")),
+            ("model_turn_started", schema_type("boolean", "Always false.")),
+            ("state_changed", schema_type("boolean", "Always false for describe.")),
+            ("error_kind", schema_type("string", "Stable native MCP guard/error code on failure.")),
+            ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
+        ])),
+        "native_mcp_call_readonly" | "native_mcp_call_effectful" => Some(wrapped_output_schema(vec![
+            ("project", schema_type("string", "Resolved Project id.")),
+            ("server", schema_type("string", "Exact native MCP server.")),
+            ("tool", schema_type("string", "Exact native MCP/Plugin tool name.")),
+            ("annotations", json!({"type":["object","null"],"additionalProperties":true,"description":"Annotations rechecked immediately before dispatch."})),
+            ("policy_class", schema_type("string", "Effectful calls report effectful_non_destructive; read-only calls may omit this field.")),
+            ("result", json!({"type":"object","additionalProperties":true,"description":"Bounded native MCP result envelope."})),
+            ("quota_mode", schema_type("string", "Always zero_codex_model_turn.")),
+            ("model_turn_started", schema_type("boolean", "Always false.")),
+            ("state_changed", schema_type("boolean", "Present and false only for the explicitly read-only lane.")),
+            ("error_kind", schema_type("string", "Stable native MCP guard/error code on failure.")),
+            ("dispatch_state", schema_type("string", "Provider dispatch certainty when a gateway failure exposes it.")),
         ])),
         "native_knowledge_load" => Some(wrapped_output_schema(vec![
             ("project", schema_type("string", "Resolved Project id.")),

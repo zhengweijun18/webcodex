@@ -156,12 +156,14 @@ The startup path is intentionally narrow:
 - provider absence, scope denial, schema drift, or timeout degrades the optional context projection instead of blocking the coding task;
 - an `outcome_unknown` dispatch remains explicitly uncertain and is never retried automatically.
 
-After startup discovery, models can stay pathless for the two native context reads:
+After startup discovery, model-visible Native-first helpers remain pathless and zero-turn:
 
-- `native_skill_load(project, name)` resolves the live native catalog on the same Runner. Exact duplicate names fail closed and return bounded opaque `wc_nskill_*` candidates; retrying with `native_skill_id` selects one candidate without ever exposing its source path. Skill bodies are bounded and return only safe metadata, hash, and text.
-- `native_knowledge_load(project, key)` accepts only a semantic `reuse-manifest.json.knowledge_paths` key. WebCodex requires the resolved entry to exist inside the Project, reads its declared entry file through the normal Runner file-read path, fences it against the manifest hash when available, and supports `start_line`/`limit` continuation using the same semantic key.
+- `native_skill_list(project, query, offset, limit)` searches the complete live native Skill catalog on the same Runner; `native_skill_load(project, name, native_skill_id, start_line, limit)` loads only the selected `SKILL.md` through opaque identity and supports line continuation. Exact duplicate names fail closed and native Skill paths never reach the model.
+- `native_knowledge_load(project, key)` accepts only a semantic `reuse-manifest.json.knowledge_paths` key. WebCodex requires the resolved entry to exist inside the Project, fences it against the manifest hash when available, and supports `start_line`/`limit` continuation using the same semantic key.
+- `native_mcp_search` and `native_mcp_describe` project the live Codex-managed MCP/Plugin catalog. The searchable set is restricted to read-only or explicitly non-destructive effectful tools; `native_mcp_call_readonly` and `native_mcp_call_effectful` re-check live annotations immediately before dispatch, while destructive or unclassified tools fail closed.
+- `native_thread_read(project, session, cursor, limit)` resolves one native Codex thread, reads canonical metadata with app-server `thread/read`, and pages recent state through `thread/items/list`. The projection strips native paths and raw MCP arguments/results while retaining the task state needed for continuation.
 
-Neither tool broadens authority: Project-read and same-Runner ownership remain required, while the internal Context Bridge dispatch still requires local-MCP authority and exact current provider schema. Neither tool accepts a filesystem path from the model.
+These helpers do not broaden authority: Project scope, same-Runner ownership, exact current provider schema, and the zero-Codex-model-turn contract remain mandatory.
 
 ### Native-first zero-turn Host Adapter
 

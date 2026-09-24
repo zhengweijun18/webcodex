@@ -16,6 +16,7 @@ import {
   listNativeMcpServers,
   listNativeSkills,
   nativeHostExecReadOnly,
+  nativeThreadRead,
   readNativeSkill,
   resolveProjectKnowledge
 } from "./bridge-lib.mjs";
@@ -96,6 +97,7 @@ const toolDefinitions = [
         query: { type: "string" },
         server: { type: ["string", "null"] },
         read_only_only: { type: "boolean" },
+        offset: { type: "integer", minimum: 0 },
         limit: { type: "integer", minimum: 1, maximum: 100 }
       },
       additionalProperties: false
@@ -192,6 +194,21 @@ const toolDefinitions = [
     }
   },
   {
+    name: "native_thread_read",
+    description: "Read one native Codex thread through app-server metadata plus paginated thread items. Returns a path-safe task-state projection and never starts a model turn.",
+    inputSchema: {
+      type: "object",
+      required: ["session"],
+      properties: {
+        project_root: { type: "string" },
+        session: { type: "string", minLength: 1, maxLength: 256 },
+        cursor: { type: ["string", "null"], maxLength: 2048 },
+        limit: { type: "integer", minimum: 1, maximum: 50 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
     name: "codex_thread_summary",
     description: "Resolve an exact/prefix native Codex session id or thread name and return a bounded user/assistant/tool-event summary from the local rollout.",
     inputSchema: {
@@ -252,6 +269,7 @@ async function callTool(name, input = {}) {
         query: input.query || "",
         server: input.server ?? null,
         readOnlyOnly: input.read_only_only ?? true,
+        offset: input.offset || 0,
         limit: input.limit || 50
       });
     case "describe_native_mcp_tool":
@@ -271,6 +289,12 @@ async function callTool(name, input = {}) {
       return dispatchHookEvent(root(input), input.event_name, input.payload || {});
     case "resolve_project_knowledge":
       return resolveProjectKnowledge(root(input));
+    case "native_thread_read":
+      return nativeThreadRead(root(input), {
+        session: input.session,
+        cursor: input.cursor ?? null,
+        limit: input.limit || 20
+      });
     case "codex_thread_summary":
       return codexThreadSummary(input.session, input.limit || 12);
     case "context_parity_check":

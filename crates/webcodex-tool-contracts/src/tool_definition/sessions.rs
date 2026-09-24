@@ -6,7 +6,7 @@ use super::{
 };
 use crate::metadata::{
     ToolPathHint::None as NoPath, ToolRisk::Read, PROJECT_READ, PROJECT_WRITE, RUNTIME_READ,
-    SESSION_COLLABORATE, TOOL_PROVIDER_CONTROL,
+    SESSION_COLLABORATE, TOOL_PROVIDER_CONTROL, TOOL_PROVIDER_RUNNER,
 };
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[
@@ -206,6 +206,44 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ),
         "Return a bounded structured summary from the session ledger for an explicit session_id: recorded events, message-board summary, task mode, guards, and lifecycle. Uses durable ledger data where session persistence is configured.",
     )),
+    adaptive_runtime_direct(
+        model_spec(
+            def(
+                "native_thread_read",
+                super::ToolAuditPolicy::typed_fields(&[
+                    super::ToolAuditResultField::value("project"),
+                    super::ToolAuditResultField::value("resolved"),
+                    super::ToolAuditResultField::value("next_cursor"),
+                    super::ToolAuditResultField::value("quota_mode"),
+                    super::ToolAuditResultField::value("model_turn_started"),
+                    super::ToolAuditResultField::value("error_kind"),
+                    super::ToolAuditResultField::value("state_changed"),
+                ])
+                .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&[
+                    "session",
+                    "cursor",
+                ])),
+                ModelVisible,
+                TOOL_CATEGORY_SESSION,
+                Some(OwnerOnly),
+                TOOL_PROVIDER_RUNNER,
+                super::ToolSemanticContract {
+                    effect: super::ToolEffect::Observe,
+                    risk: Read,
+                    approval: super::ToolApprovalPolicy::None,
+                    idempotency: super::ToolIdempotency::PureRead,
+                },
+                Some(PROJECT_READ),
+                true,
+                NoPath,
+                false,
+                false,
+                super::ToolSessionEvidencePolicy::NONE,
+            ),
+            "Read canonical native Codex thread metadata plus one recent item page through app-server thread/read and thread/items/list. The Bridge strips native filesystem paths, MCP arguments/results, and other raw payloads; starts no Codex model turn.",
+        ),
+        34,
+    ),
     requires_explicit_business_session(permission_risk(
         model_spec(
             def(
