@@ -2633,6 +2633,13 @@ pub enum ToolCall {
         #[schemars(range(min = 1))]
         #[serde(default)]
         limit: Option<usize>,
+        /// Collect bounded deterministic handoff evidence across recent pages.
+        #[serde(default)]
+        handoff: Option<bool>,
+        /// Stable most-recent item ID from a previous handoff, used for incremental recovery.
+        #[schemars(length(min = 1, max = 256))]
+        #[serde(default)]
+        since_item_id: Option<String>,
         #[serde(default)]
         session_id: Option<String>,
     },

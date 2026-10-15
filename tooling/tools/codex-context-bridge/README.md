@@ -2,7 +2,7 @@
 
 把本机 Codex 的可观察上下文通过 Runner 内部 MCP 提供给 WebCodex。它是 WebCodex fork 的可复现运行组件，不是模型可直接枚举/调用的通用 MCP Provider。它不复制 Native Host 或模型智能，也不产生 Codex model turn。
 
-当前 Bridge 版本为 **0.6.1**。`readiness.mjs` 是 Desktop、Runner 与 Bridge 共同使用的 Codex reference 真相源：允许受支持的 CLI symlink 入口，但必须 canonicalize 到最终 regular executable；显式无效的 `CODEX_BIN` 会 fail closed，不会静默改用另一份 Codex。
+当前 Bridge 版本为 **0.6.2**。`readiness.mjs` 是 Desktop、Runner 与 Bridge 共同使用的 Codex reference 真相源：允许受支持的 CLI symlink 入口，但必须 canonicalize 到最终 regular executable；显式无效的 `CODEX_BIN` 会 fail closed，不会静默改用另一份 Codex。
 
 ## 能力
 

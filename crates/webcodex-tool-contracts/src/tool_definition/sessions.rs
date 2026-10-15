@@ -240,7 +240,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Read canonical native Codex thread metadata plus one recent item page through app-server thread/read and thread/items/list. The Bridge strips native filesystem paths, MCP arguments/results, and other raw payloads; starts no Codex model turn.",
+            "Read native Codex thread without model turns. Default: path-safe page + cursor. handoff=true scans up to 600 items for messages, plans, failures and latest_item_id. since_item_id requests a delta; basis_complete=false requires reconciliation. Verify current files and tests separately.",
         ),
         34,
     ),

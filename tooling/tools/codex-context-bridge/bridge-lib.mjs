@@ -1036,7 +1036,9 @@ function threadMetadataSummary(thread) {
 export async function nativeThreadRead(projectRoot, {
   session,
   cursor = null,
-  limit = 20
+  limit = 20,
+  handoff = false,
+  sinceItemId = null
 } = {}) {
   const root = ensureProjectRoot(projectRoot);
   const query = String(session || "").trim();
@@ -1060,6 +1062,11 @@ export async function nativeThreadRead(projectRoot, {
 
   const selected = matches[0];
   const boundedLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
+  if (handoff && cursor != null) throw new Error("handoff starts from the current thread head, not a history cursor");
+  if (!handoff && sinceItemId != null) throw new Error("since_item_id requires handoff mode");
+  if (sinceItemId != null && (typeof sinceItemId !== "string" || !sinceItemId.trim() || sinceItemId.length > 256)) {
+    throw new Error("invalid native thread handoff anchor");
+  }
   return withCodexAppServer(root, async ({ request }) => {
     const metadata = await request("thread/read", {
       threadId: selected.id,
@@ -1074,6 +1081,72 @@ export async function nativeThreadRead(projectRoot, {
     const canonicalCwd = fs.realpathSync(threadCwd);
     if (canonicalCwd !== canonicalRoot && !canonicalCwd.startsWith(canonicalRoot + path.sep)) {
       throw new Error("native thread is outside the resolved WebCodex project");
+    }
+    if (handoff) {
+      // Deterministic evidence collection, not an LLM-generated task summary.
+      // Never expose raw commands, MCP arguments, native paths or hidden reasoning.
+      const evidence = { user_messages: [], agent_messages: [], plans: [], failed_actions: [] };
+      const action_counts = { commands: 0, file_changes: 0, mcp_calls: 0 };
+      let next = null;
+      let latestItemId = null;
+      let pages = 0;
+      let observed = 0;
+      let foundAnchor = false;
+      let exhausted = false;
+      for (; pages < 12; ) {
+        const page = await request("thread/items/list", {
+          threadId: selected.id, cursor: next, limit: 50, sortDirection: "desc"
+        }, 30000);
+        const entries = Array.isArray(page?.data) ? page.data : [];
+        pages++;
+        if (pages === 1) latestItemId = entries[0]?.item?.id || null;
+        for (const entry of entries) {
+          if (sinceItemId && entry?.item?.id === sinceItemId) {
+            foundAnchor = true;
+            break;
+          }
+          observed++;
+          const value = threadItemSummary(entry);
+          if (value.type === "userMessage" && evidence.user_messages.length < 8)
+            evidence.user_messages.push({ id: value.id, turn_id: value.turn_id, text: boundedThreadText(value.text, 1600) });
+          if (value.type === "agentMessage" && evidence.agent_messages.length < 12)
+            evidence.agent_messages.push({ id: value.id, turn_id: value.turn_id, phase: value.phase, text: boundedThreadText(value.text, 1600) });
+          if (value.type === "plan" && evidence.plans.length < 5)
+            evidence.plans.push({ id: value.id, turn_id: value.turn_id, text: boundedThreadText(value.text, 1200) });
+          if (value.type === "commandExecution") action_counts.commands++;
+          if (value.type === "fileChange") action_counts.file_changes++;
+          if (value.type === "mcpToolCall") action_counts.mcp_calls++;
+          if (evidence.failed_actions.length < 12 && (
+            (value.type === "commandExecution" && (value.exit_code !== null && value.exit_code !== 0 || value.status === "failed")) ||
+            (value.type === "mcpToolCall" && (value.has_error || value.status === "failed")) ||
+            (value.type === "dynamicToolCall" && value.success === false)
+          )) evidence.failed_actions.push({
+            id: value.id, turn_id: value.turn_id, type: value.type,
+            status: value.status || null, exit_code: value.exit_code ?? null
+          });
+        }
+        next = page?.nextCursor || null;
+        if (foundAnchor) break;
+        if (!next || entries.length === 0) { exhausted = true; break; }
+      }
+      const current = await request("thread/read", {
+        threadId: selected.id, includeTurns: false
+      }, 30000);
+      const changedDuringScan = current?.thread?.updatedAt !== thread?.updatedAt;
+      const coverage = sinceItemId
+        ? foundAnchor ? "through_anchor" : exhausted ? "anchor_not_found" : "bounded_only"
+        : exhausted ? "full_history" : "bounded_only";
+      return {
+        query, resolved: true, thread: threadMetadataSummary(thread),
+        handoff: {
+          coverage, basis_complete: !changedDuringScan && (foundAnchor || (!sinceItemId && exhausted)),
+          changed_during_scan: changedDuringScan, latest_item_id: latestItemId,
+          since_item_id: sinceItemId, anchor_found: foundAnchor,
+          pages_scanned: pages, items_scanned: observed, next_cursor: foundAnchor ? null : next,
+          action_counts, evidence
+        },
+        quota_mode: "zero_codex_model_turn", model_turn_started: false
+      };
     }
     const page = await request("thread/items/list", {
       threadId: selected.id,

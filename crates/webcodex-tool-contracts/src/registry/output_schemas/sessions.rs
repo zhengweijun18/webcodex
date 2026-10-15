@@ -79,6 +79,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("candidates", array_schema(open_object_schema("Bounded pathless native thread candidate identity."), "Returned only for unresolved queries.")),
             ("thread", open_object_schema("Path-safe native thread metadata. Filesystem paths and full turn bodies are omitted.")),
             ("items", array_schema(open_object_schema("Path-safe recent native thread item summary."), "Newest-first canonical native thread item page.")),
+            ("handoff", open_object_schema("Optional deterministic multi-page handoff evidence, snapshot/delta anchor and boundedness/concurrency status. basis_complete=false must not be treated as full coverage.")),
             ("next_cursor", nullable_schema("string", "Opaque cursor for the next older item page.")),
             ("backwards_cursor", nullable_schema("string", "Opaque cursor for reverse-direction observation when supplied by app-server.")),
             ("quota_mode", schema_type("string", "Always zero_codex_model_turn.")),

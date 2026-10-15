@@ -123,6 +123,13 @@ async function fakeAppServer() {
           });
           break;
         case "thread/items/list":
+          if (message.params?.cursor === "cursor-next") {
+            reply(message.id, {
+              data: [{ turnId: "turn-0", item: { id: "item-old", type: "userMessage", content: [{ type: "text", text: "older task" }] } }],
+              nextCursor: null, backwardsCursor: null
+            });
+            break;
+          }
           reply(message.id, {
             data: [
               {
@@ -212,10 +219,18 @@ async function nativeDiscoveryChild() {
     limit: 10
   });
   const thread = await bridge.nativeThreadRead(process.env.WEBCODEX_PROJECT_ROOT, {
-    session: "thread-fixture",
-    limit: 2
+    session: "thread-fixture", limit: 2
   });
-  process.stdout.write(JSON.stringify({ mcp, allowedMcp, thread }) + "\n");
+  const handoff = await bridge.nativeThreadRead(process.env.WEBCODEX_PROJECT_ROOT, {
+    session: "thread-fixture", handoff: true
+  });
+  const delta = await bridge.nativeThreadRead(process.env.WEBCODEX_PROJECT_ROOT, {
+    session: "thread-fixture", handoff: true, sinceItemId: "item-user"
+  });
+  const missingAnchor = await bridge.nativeThreadRead(process.env.WEBCODEX_PROJECT_ROOT, {
+    session: "thread-fixture", handoff: true, sinceItemId: "item-missing"
+  });
+  process.stdout.write(JSON.stringify({ mcp, allowedMcp, thread, handoff, delta, missingAnchor }) + "\n");
 }
 
 function runChild(env) {
@@ -329,7 +344,7 @@ async function main() {
     assert.equal(readinessCliPayload.reason, "codex_reference_invalid");
     assert.equal(readinessCliPayload.native_model_turns, 0);
     const first = runChild(baseEnv);
-    assert.equal(first.bridge_version, "0.6.1");
+    assert.equal(first.bridge_version, "0.6.2");
     assert.equal(first.stale, false);
     assert.match(first.fingerprint, /^sha256:[a-f0-9]{64}$/);
     const escape = first.knowledge.entries.find(entry => entry.key === "escape");
@@ -391,6 +406,19 @@ async function main() {
     assert.equal(nativeDiscoveryJson.includes(project), false);
     assert.equal(nativeDiscoveryJson.includes("DO_NOT_EXPOSE"), false);
     assert.equal(nativeDiscovery.thread.model_turn_started, false);
+    assert.equal(nativeDiscovery.handoff.handoff.coverage, "full_history");
+    assert.equal(nativeDiscovery.handoff.handoff.basis_complete, true);
+    assert.equal(nativeDiscovery.handoff.handoff.pages_scanned, 2);
+    assert.equal(nativeDiscovery.handoff.handoff.latest_item_id, "item-tool");
+    assert.deepEqual(nativeDiscovery.handoff.handoff.evidence.user_messages.map(item => item.text), ["resume fixture", "older task"]);
+    assert.deepEqual(nativeDiscovery.handoff.handoff.action_counts, { commands: 0, file_changes: 0, mcp_calls: 1 });
+    assert.equal(nativeDiscovery.delta.handoff.coverage, "through_anchor");
+    assert.equal(nativeDiscovery.delta.handoff.basis_complete, true);
+    assert.equal(nativeDiscovery.delta.handoff.items_scanned, 1);
+    assert.equal(nativeDiscovery.missingAnchor.handoff.coverage, "anchor_not_found");
+    assert.equal(nativeDiscovery.missingAnchor.handoff.basis_complete, false);
+    assert.equal(JSON.stringify(nativeDiscovery).includes("DO_NOT_EXPOSE"), false);
+    assert.equal(nativeDiscovery.handoff.model_turn_started, false);
 
     const readiness = await probeCodexReadiness({ env: baseEnv, timeoutMs: 3000 });
     assert.equal(readiness.status, "ready", JSON.stringify(readiness));
@@ -412,6 +440,7 @@ async function main() {
       native_mcp_search_pagination: true,
       native_mcp_search_excludes_destructive: true,
       native_thread_read_path_safe: true,
+      native_thread_handoff_incremental: true,
       skill_body_changes_fingerprint: true,
       symlink_metadata_escape_blocked: true,
       native_model_turns: 0

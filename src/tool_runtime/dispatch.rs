@@ -2253,6 +2253,8 @@ impl ToolRuntime {
                 session,
                 cursor,
                 limit,
+                handoff,
+                since_item_id,
                 ..
             } => {
                 let project = match project_resolution {
@@ -2262,8 +2264,16 @@ impl ToolRuntime {
                         return ToolResult::err("native_thread_read requires a resolved Project")
                     }
                 };
-                self.native_thread_read(&project, session, cursor, limit, auth)
-                    .await
+                self.native_thread_read(
+                    &project,
+                    session,
+                    cursor,
+                    limit,
+                    handoff,
+                    since_item_id,
+                    auth,
+                )
+                .await
             }
 
             ToolCall::SkillList {

@@ -203,7 +203,9 @@ const toolDefinitions = [
         project_root: { type: "string" },
         session: { type: "string", minLength: 1, maxLength: 256 },
         cursor: { type: ["string", "null"], maxLength: 2048 },
-        limit: { type: "integer", minimum: 1, maximum: 50 }
+        limit: { type: "integer", minimum: 1, maximum: 50 },
+        handoff: { type: "boolean" },
+        since_item_id: { type: ["string", "null"], minLength: 1, maxLength: 256 }
       },
       additionalProperties: false
     }
@@ -293,7 +295,9 @@ async function callTool(name, input = {}) {
       return nativeThreadRead(root(input), {
         session: input.session,
         cursor: input.cursor ?? null,
-        limit: input.limit || 20
+        limit: input.limit || 20,
+        handoff: input.handoff === true,
+        sinceItemId: input.since_item_id ?? null
       });
     case "codex_thread_summary":
       return codexThreadSummary(input.session, input.limit || 12);

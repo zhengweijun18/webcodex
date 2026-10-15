@@ -488,6 +488,8 @@ impl ToolRuntime {
         session: String,
         cursor: Option<String>,
         limit: Option<usize>,
+        handoff: Option<bool>,
+        since_item_id: Option<String>,
         auth: Option<&AuthContext>,
     ) -> ToolResult {
         let raw = match self
@@ -499,6 +501,8 @@ impl ToolRuntime {
                     "session": session,
                     "cursor": cursor,
                     "limit": limit.unwrap_or(20).clamp(1, 50),
+                    "handoff": handoff.unwrap_or(false),
+                    "since_item_id": since_item_id,
                 }),
                 auth,
             )
